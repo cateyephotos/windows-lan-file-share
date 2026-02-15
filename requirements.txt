@@ -1,0 +1,25 @@
+# Windows LAN File Share Utility Requirements
+# No external dependencies required - uses only Python standard library
+# Compatible with Python 3.6+
+
+# The application uses only built-in Python modules:
+# - tkinter (GUI framework - comes with Python)
+# - http.server (HTTP server)
+# - socket (network operations)
+# - threading (concurrent operations)
+# - pathlib (file path handling)
+# - subprocess (system operations)
+# - webbrowser (browser integration)
+# - json (data serialization)
+# - uuid (unique identifiers)
+# - datetime (date/time operations)
+# - os (operating system interface)
+
+# Note: tkinter is included with most Python installations on Windows.
+# If tkinter is not available, install it with:
+# python -m pip install tk
+
+# For enhanced features (optional):
+# requests>=2.25.0  # For better HTTP client functionality
+# pillow>=8.0.0     # For image thumbnail generation
+# psutil>=5.8.0     # For system information and network scanning
