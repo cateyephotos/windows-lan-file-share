@@ -42,6 +42,57 @@ class FileShareHandler(SimpleHTTPRequestHandler):
         else:
             super().do_GET()
     
+    def do_HEAD(self):
+        """Handle HEAD requests — return headers only, no body"""
+        if self.path == '/':
+            html_content = self.generate_file_list_html()
+            self.send_response(200)
+            self.send_header('Content-type', 'text/html')
+            self.send_header('Content-Length', str(len(html_content.encode('utf-8'))))
+            self.end_headers()
+        elif self.path.startswith('/download/'):
+            file_id = self.path.split('/download/')[-1]
+            if file_id in self.shared_files:
+                file_path = self.shared_files[file_id]['path']
+                if os.path.exists(file_path):
+                    filename = os.path.basename(file_path)
+                    file_size = os.path.getsize(file_path)
+                    self.send_response(200)
+                    self.send_header('Content-type', 'application/octet-stream')
+                    self.send_header('Content-Disposition', f'attachment; filename="{filename}"')
+                    self.send_header('Content-Length', str(file_size))
+                    self.send_header('Accept-Ranges', 'bytes')
+                    self.end_headers()
+                else:
+                    self.send_error(404, "File not found")
+            else:
+                self.send_error(404, "File not found")
+        elif self.path.startswith('/files/'):
+            file_id = self.path.split('/files/')[-1]
+            if file_id in self.shared_files:
+                file_path = self.shared_files[file_id]['path']
+                if os.path.exists(file_path):
+                    file_size = os.path.getsize(file_path)
+                    self.send_response(200)
+                    if file_path.lower().endswith(('.txt', '.py', '.js', '.html', '.css', '.json', '.xml')):
+                        self.send_header('Content-type', 'text/plain')
+                    elif file_path.lower().endswith(('.jpg', '.jpeg')):
+                        self.send_header('Content-type', 'image/jpeg')
+                    elif file_path.lower().endswith('.png'):
+                        self.send_header('Content-type', 'image/png')
+                    elif file_path.lower().endswith('.gif'):
+                        self.send_header('Content-type', 'image/gif')
+                    else:
+                        self.send_header('Content-type', 'application/octet-stream')
+                    self.send_header('Content-Length', str(file_size))
+                    self.end_headers()
+                else:
+                    self.send_error(404, "File not found")
+            else:
+                self.send_error(404, "File not found")
+        else:
+            super().do_HEAD()
+    
     def serve_file_list(self):
         """Serve the file listing page"""
         html_content = self.generate_file_list_html()
