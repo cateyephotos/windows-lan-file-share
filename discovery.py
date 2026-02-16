@@ -158,10 +158,19 @@ class NetworkDiscovery:
             
             if active_hosts:
                 print(f"[Discovery] Scanning {len(active_hosts)} hosts from ARP table...")
+                
+                # Get local IP to filter out self
+                local_ip = self._get_local_ip()
+                
                 checked_count = 0
                 for i, ip in enumerate(active_hosts):
                     if not self.is_running:
                         break
+                        
+                    # Skip local machine
+                    if ip == local_ip:
+                        continue
+                        
                     self._check_server(ip, self.port)
                     checked_count += 1
                 print(f"[Discovery] Scan complete - checked {checked_count} hosts")
@@ -207,6 +216,10 @@ class NetworkDiscovery:
     
     def _check_server(self, ip, port):
         """Check if a file share server is running at the given IP and port"""
+        # Don't check self
+        if ip == "127.0.0.1" or ip == self._get_local_ip():
+            return
+            
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.settimeout(2)
