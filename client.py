@@ -11,6 +11,8 @@ import urllib.error
 from urllib.parse import urljoin
 import threading
 from datetime import datetime
+from config import get_chunk_size, CONFIG
+from fast_transfer import MultiThreadedDownloader, should_use_multithread, calculate_optimal_threads, SpeedMonitor
 
 class FileShareClient:
     """Client for connecting to and downloading from other file share servers"""
@@ -96,22 +98,22 @@ class FileShareClient:
         
         return files
     
-    def download_file(self, server_url, file_id, file_name, save_directory, token=None):
-        """Download a file from a remote server"""
+    def download_file(self, server_url, file_id, file_name, save_directory, token=None, file_size=None):
+        """Download a file from a remote server (uses multi-threading for large files)"""
         download_id = f"{server_url}_{file_id}"
         
         # Start download in a separate thread
         thread = threading.Thread(
             target=self._download_file_thread,
-            args=(server_url, file_id, file_name, save_directory, token, download_id),
+            args=(server_url, file_id, file_name, save_directory, token, download_id, file_size),
             daemon=True
         )
         thread.start()
         
         return download_id
     
-    def _download_file_thread(self, server_url, file_id, file_name, save_directory, token, download_id):
-        """Download file in a separate thread"""
+    def _download_file_thread(self, server_url, file_id, file_name, save_directory, token, download_id, file_size=None):
+        """Download file in a separate thread with multi-threading support for large files"""
         try:
             self.active_downloads[download_id] = {
                 'status': 'downloading',
@@ -124,13 +126,6 @@ class FileShareClient:
             # Construct download URL
             download_url = urljoin(server_url, f'/download/{file_id}')
             
-            # Prepare request
-            headers = {}
-            if token:
-                headers['Authorization'] = f'Bearer {token}'
-            
-            req = urllib.request.Request(download_url, headers=headers)
-            
             # Create save path
             os.makedirs(save_directory, exist_ok=True)
             save_path = os.path.join(save_directory, file_name)
@@ -142,27 +137,71 @@ class FileShareClient:
                 save_path = os.path.join(save_directory, f"{base_name}_{counter}{extension}")
                 counter += 1
             
-            # Download file with progress tracking
-            with urllib.request.urlopen(req, timeout=30) as response:
-                total_size = int(response.headers.get('Content-Length', 0))
-                downloaded = 0
+            # Get file size if not provided
+            if file_size is None:
+                headers = {}
+                if token:
+                    headers['Authorization'] = f'Bearer {token}'
+                req = urllib.request.Request(download_url, headers=headers, method='HEAD')
+                try:
+                    with urllib.request.urlopen(req, timeout=10) as response:
+                        file_size = int(response.headers.get('Content-Length', 0))
+                except:
+                    file_size = 0
+            
+            # Determine if multi-threaded download should be used
+            use_multithread = should_use_multithread(file_size) if file_size > 0 else False
+            
+            if use_multithread:
+                # Use multi-threaded download for large files
+                num_threads = calculate_optimal_threads(file_size)
+                self.notify_callbacks(download_id, 'progress', 0, 
+                                    f"Starting multi-threaded download ({num_threads} threads)...")
                 
-                with open(save_path, 'wb') as f:
-                    chunk_size = 8192
-                    while True:
-                        chunk = response.read(chunk_size)
-                        if not chunk:
-                            break
-                        
-                        f.write(chunk)
-                        downloaded += len(chunk)
-                        
-                        # Calculate progress
-                        if total_size > 0:
-                            progress = int((downloaded / total_size) * 100)
-                            self.active_downloads[download_id]['progress'] = progress
-                            self.notify_callbacks(download_id, 'progress', progress, 
-                                                f"Downloading: {progress}%")
+                speed_monitor = SpeedMonitor()
+                
+                def progress_callback(downloaded, total, speed_mbps):
+                    progress = int((downloaded / total) * 100) if total > 0 else 0
+                    self.active_downloads[download_id]['progress'] = progress
+                    speed_monitor.add_sample(downloaded, 1)
+                    avg_speed = speed_monitor.get_average_speed()
+                    self.notify_callbacks(download_id, 'progress', progress, 
+                                        f"Downloading: {progress}% @ {speed_monitor.format_speed(avg_speed)}")
+                
+                downloader = MultiThreadedDownloader(download_url, save_path, file_size, num_threads, token)
+                success, message = downloader.download(progress_callback)
+                
+                if not success:
+                    raise Exception(message)
+            else:
+                # Use single-threaded download for smaller files
+                headers = {}
+                if token:
+                    headers['Authorization'] = f'Bearer {token}'
+                
+                req = urllib.request.Request(download_url, headers=headers)
+                timeout = CONFIG.get('download_timeout', 300)
+                
+                with urllib.request.urlopen(req, timeout=timeout) as response:
+                    total_size = int(response.headers.get('Content-Length', 0))
+                    downloaded = 0
+                    
+                    chunk_size = get_chunk_size(total_size) if total_size > 0 else CONFIG.get('chunk_size_medium', 65536)
+                    
+                    with open(save_path, 'wb') as f:
+                        while True:
+                            chunk = response.read(chunk_size)
+                            if not chunk:
+                                break
+                            
+                            f.write(chunk)
+                            downloaded += len(chunk)
+                            
+                            if total_size > 0:
+                                progress = int((downloaded / total_size) * 100)
+                                self.active_downloads[download_id]['progress'] = progress
+                                self.notify_callbacks(download_id, 'progress', progress, 
+                                                    f"Downloading: {progress}%")
             
             # Download complete
             self.active_downloads[download_id]['status'] = 'completed'

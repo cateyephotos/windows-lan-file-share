@@ -21,6 +21,8 @@ import uuid
 from discovery import NetworkDiscovery, create_discovery_integration
 from security import AccessControl, SecureFileShareHandler
 from client import FileShareClient, RemoteServerBrowser, create_client_integration
+from config import get_chunk_size, validate_file_size, format_file_size, CONFIG
+from fast_transfer import OptimizedHTTPServer, should_use_multithread, calculate_optimal_threads, MultiThreadedDownloader, SpeedMonitor
 
 class FileShareHandler(SimpleHTTPRequestHandler):
     """Custom HTTP handler for file sharing"""
@@ -48,19 +50,80 @@ class FileShareHandler(SimpleHTTPRequestHandler):
         self.wfile.write(html_content.encode('utf-8'))
     
     def serve_file_download(self):
-        """Handle file download requests"""
+        """Handle file download requests with chunked transfer and Range support for multi-threading"""
         file_id = self.path.split('/download/')[-1]
         if file_id in self.shared_files:
             file_path = self.shared_files[file_id]['path']
             if os.path.exists(file_path):
                 filename = os.path.basename(file_path)
-                self.send_response(200)
-                self.send_header('Content-type', 'application/octet-stream')
-                self.send_header('Content-Disposition', f'attachment; filename="{filename}"')
-                self.end_headers()
+                file_size = os.path.getsize(file_path)
                 
-                with open(file_path, 'rb') as f:
-                    self.wfile.write(f.read())
+                # Check for Range header (for multi-threaded downloads)
+                range_header = self.headers.get('Range')
+                
+                if range_header:
+                    # Parse range header
+                    try:
+                        byte_range = range_header.replace('bytes=', '').split('-')
+                        start = int(byte_range[0]) if byte_range[0] else 0
+                        end = int(byte_range[1]) if byte_range[1] else file_size - 1
+                        
+                        # Validate range
+                        if start >= file_size or end >= file_size or start > end:
+                            self.send_error(416, "Requested Range Not Satisfiable")
+                            return
+                        
+                        content_length = end - start + 1
+                        
+                        # Send partial content response
+                        self.send_response(206)
+                        self.send_header('Content-type', 'application/octet-stream')
+                        self.send_header('Content-Disposition', f'attachment; filename="{filename}"')
+                        self.send_header('Content-Length', str(content_length))
+                        self.send_header('Content-Range', f'bytes {start}-{end}/{file_size}')
+                        self.send_header('Accept-Ranges', 'bytes')
+                        self.end_headers()
+                        
+                        # Send requested byte range
+                        with open(file_path, 'rb') as f:
+                            f.seek(start)
+                            remaining = content_length
+                            chunk_size = get_chunk_size(content_length)
+                            
+                            while remaining > 0:
+                                read_size = min(chunk_size, remaining)
+                                chunk = f.read(read_size)
+                                if not chunk:
+                                    break
+                                try:
+                                    self.wfile.write(chunk)
+                                    remaining -= len(chunk)
+                                except (BrokenPipeError, ConnectionResetError):
+                                    break
+                    except (ValueError, IndexError):
+                        self.send_error(400, "Invalid Range header")
+                        return
+                else:
+                    # Normal full file download
+                    self.send_response(200)
+                    self.send_header('Content-type', 'application/octet-stream')
+                    self.send_header('Content-Disposition', f'attachment; filename="{filename}"')
+                    self.send_header('Content-Length', str(file_size))
+                    self.send_header('Accept-Ranges', 'bytes')
+                    self.end_headers()
+                    
+                    # Use chunked transfer for efficient memory usage
+                    chunk_size = get_chunk_size(file_size)
+                    with open(file_path, 'rb') as f:
+                        while True:
+                            chunk = f.read(chunk_size)
+                            if not chunk:
+                                break
+                            try:
+                                self.wfile.write(chunk)
+                            except (BrokenPipeError, ConnectionResetError):
+                                # Client disconnected
+                                break
             else:
                 self.send_error(404, "File not found")
         else:
@@ -570,8 +633,8 @@ class LANFileShareApp:
             else:
                 handler = lambda *args, **kwargs: FileShareHandler(*args, shared_files=self.shared_files, **kwargs)
             
-            # Start server
-            self.server = HTTPServer(('0.0.0.0', self.port), handler)
+            # Start optimized server with network optimizations
+            self.server = OptimizedHTTPServer.create_optimized_server(('0.0.0.0', self.port), handler)
             self.server_thread = threading.Thread(target=self.server.serve_forever, daemon=True)
             self.server_thread.start()
             
@@ -661,7 +724,7 @@ class LANFileShareApp:
             self.log(f"No new files found in folder: {os.path.basename(folder_path)}")
     
     def _add_single_file(self, file_path, show_log=True):
-        """Add a single file to the shared files list"""
+        """Add a single file to the shared files list with size validation"""
         try:
             # Check if file already exists
             if file_path in [f['path'] for f in self.shared_files.values()]:
@@ -671,8 +734,21 @@ class LANFileShareApp:
             if not os.path.isfile(file_path):
                 return False
             
-            file_id = str(uuid.uuid4())
             file_stat = os.stat(file_path)
+            file_size_bytes = file_stat.st_size
+            
+            # Validate file size
+            is_valid, message = validate_file_size(file_size_bytes)
+            if not is_valid:
+                if show_log:
+                    self.log(f"⚠️ Skipped {os.path.basename(file_path)}: {message}")
+                return False
+            
+            # Warn about large files
+            if message and show_log:
+                self.log(f"⚠️ {os.path.basename(file_path)}: {message}")
+            
+            file_id = str(uuid.uuid4())
             
             # Get relative display name (show folder structure)
             display_name = os.path.basename(file_path)
@@ -681,7 +757,8 @@ class LANFileShareApp:
                 'id': file_id,
                 'name': display_name,
                 'path': file_path,
-                'size': self.format_file_size(file_stat.st_size),
+                'size': format_file_size(file_size_bytes),
+                'size_bytes': file_size_bytes,
                 'modified': datetime.fromtimestamp(file_stat.st_mtime).strftime('%Y-%m-%d %H:%M:%S'),
                 'full_path': file_path
             }
@@ -695,7 +772,7 @@ class LANFileShareApp:
             ))
             
             if show_log:
-                self.log(f"Added file: {file_info['name']}")
+                self.log(f"Added file: {file_info['name']} ({file_info['size']})")
             
             return True
             
@@ -723,14 +800,7 @@ class LANFileShareApp:
     
     def format_file_size(self, size_bytes):
         """Format file size in human readable format"""
-        if size_bytes < 1024:
-            return f"{size_bytes} B"
-        elif size_bytes < 1024 * 1024:
-            return f"{size_bytes / 1024:.1f} KB"
-        elif size_bytes < 1024 * 1024 * 1024:
-            return f"{size_bytes / (1024 * 1024):.1f} MB"
-        else:
-            return f"{size_bytes / (1024 * 1024 * 1024):.1f} GB"
+        return format_file_size(size_bytes)
     
     def log(self, message):
         """Add message to activity log"""
