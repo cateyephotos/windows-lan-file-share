@@ -63,8 +63,45 @@ A comprehensive Windows utility for sharing and downloading files over WiFi-LAN 
 
 1. **Add Files**: Click "Add Files" button to select individual files you want to share
 2. **Add Folders**: Click "Add Folder" button to share entire folders (includes all files and subfolders recursively)
-3. **Start Server**: Click "Start Server" to begin sharing
-4. **Access Files**: Open the provided URL in any browser on devices connected to the same network
+3. **Configure Settings** (Optional): Click "⚙️ Settings" to adjust file size limits, performance, and network options
+4. **Start Server**: Click "Start Server" to begin sharing
+5. **Access Files**: Open the provided URL in any browser on devices connected to the same network
+
+### Configuring Settings
+
+**Access Settings:**
+- Click the "⚙️ Settings" button in the main window
+- A new window opens with 4 tabs of configuration options
+
+**File Settings Tab:**
+- Maximum File Size - Control the largest file that can be shared
+- Warning Threshold - Get alerts for large files
+- Max Total Share Size - Limit total size of all shared files
+- Show Warnings - Toggle file size warning notifications
+
+**Performance Tab:**
+- Enable Multi-threaded Downloads - Turn on/off parallel downloads
+- Maximum Download Threads - Set number of parallel threads (1-16)
+- Min File Size for Multi-thread - Files above this use multi-threading
+- Thread Chunk Size - Size of chunks per thread
+- Max Concurrent Downloads - Number of simultaneous downloads allowed
+
+**Network Tab:**
+- TCP Buffer Size - Increase for better throughput on fast networks
+- Download Timeout - How long to wait before timing out
+- Connection Timeout - Initial connection timeout
+- TCP_NODELAY - Lower latency (recommended for LAN)
+- TCP Keepalive - Maintain stable connections
+
+**Advanced Tab:**
+- Chunk sizes for different file sizes
+- Auto-refresh interval for network discovery
+- Fine-tune transfer optimization
+
+**Saving Settings:**
+- Click "Save" to apply and save to `config.json`
+- Click "Reset to Defaults" to restore original values
+- Click "Cancel" to discard changes
 
 **Note**: When adding a folder, all files within that folder and its subfolders will be automatically added to the share list.
 
@@ -165,9 +202,31 @@ The application includes advanced features for **maximum transfer speed**:
 - Progress percentage tracking
 - Estimated time remaining
 
-### Custom Configuration
+### UI Configuration (Recommended)
 
-Create a `config.json` file to override defaults:
+The easiest way to configure settings is through the built-in Settings UI:
+
+1. **Open Settings**: Click the "⚙️ Settings" button in the main window
+2. **Adjust Settings**: Use the tabbed interface to modify settings
+3. **Save Changes**: Click "Save" to apply and persist your changes
+
+**Settings Tabs:**
+- **File Settings** - File size limits and warnings
+- **Performance** - Multi-threaded downloads and concurrency
+- **Network** - TCP optimization and timeouts
+- **Advanced** - Chunk sizes and other technical settings
+
+**Features:**
+- ✅ User-friendly interface with validation
+- ✅ Organized into logical categories
+- ✅ Default value hints for each setting
+- ✅ Reset to defaults option
+- ✅ Automatic save to `config.json`
+- ✅ Input validation prevents invalid values
+
+### Manual Configuration
+
+Alternatively, create a `config.json` file to override defaults:
 ```json
 {
   "max_file_size_mb": 20480,
@@ -378,6 +437,7 @@ windsurf-project/
 ├── security.py            # Security features
 ├── config.py              # Configuration and file size management
 ├── fast_transfer.py       # Multi-threaded downloads and network optimization
+├── settings_ui.py         # Settings configuration UI
 ├── setup.py               # Setup script
 ├── start.bat              # Main launcher (recommended)
 ├── quick-start.bat        # Interactive menu launcher
@@ -388,7 +448,7 @@ windsurf-project/
 ├── install-service.bat    # Service installation helper
 ├── requirements.txt       # Dependencies
 ├── README.md              # Documentation
-└── config.json            # User configuration (optional)
+└── config.json            # User configuration (auto-generated)
 ```
 
 ## License

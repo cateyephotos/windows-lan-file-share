@@ -21,8 +21,9 @@ import uuid
 from discovery import NetworkDiscovery, create_discovery_integration
 from security import AccessControl, SecureFileShareHandler
 from client import FileShareClient, RemoteServerBrowser, create_client_integration
-from config import get_chunk_size, validate_file_size, format_file_size, CONFIG
+from config import get_chunk_size, validate_file_size, format_file_size, CONFIG, load_config_from_file
 from fast_transfer import OptimizedHTTPServer, should_use_multithread, calculate_optimal_threads, MultiThreadedDownloader, SpeedMonitor
+from settings_ui import open_settings
 
 class FileShareHandler(SimpleHTTPRequestHandler):
     """Custom HTTP handler for file sharing"""
@@ -282,9 +283,11 @@ class LANFileShareApp:
         self.open_browser_button = ttk.Button(button_frame, text="Open in Browser", command=self.open_in_browser, state=tk.DISABLED)
         self.open_browser_button.grid(row=0, column=2, padx=(0, 10))
         
+        ttk.Button(button_frame, text="⚙️ Settings", command=self.open_settings).grid(row=0, column=3, padx=(0, 10))
+        
         self.security_var = tk.BooleanVar()
         self.security_check = ttk.Checkbutton(button_frame, text="Enable Security", variable=self.security_var, command=self.toggle_security)
-        self.security_check.grid(row=0, column=3)
+        self.security_check.grid(row=0, column=4)
         
         # File Management Frame
         file_frame = ttk.LabelFrame(main_frame, text="File Management", padding="10")
@@ -802,6 +805,11 @@ class LANFileShareApp:
         """Format file size in human readable format"""
         return format_file_size(size_bytes)
     
+    def open_settings(self):
+        """Open settings window"""
+        open_settings(self.root)
+        self.log("Settings window opened")
+    
     def log(self, message):
         """Add message to activity log"""
         timestamp = datetime.now().strftime("%H:%M:%S")
@@ -810,6 +818,8 @@ class LANFileShareApp:
     
     def run(self):
         """Start the application"""
+        # Load configuration from file if it exists
+        load_config_from_file()
         self.log("Windows LAN File Share started")
         self.log("Add files and click 'Start Server' to begin sharing")
         try:
