@@ -569,11 +569,15 @@ class LANFileShareApp:
         self.download_save_dir = self.load_download_directory()
         self.connected_clients = {}  # Track connected clients
         self.connection_history = []  # Store connection history
+        self.config_file = os.path.join(os.path.expanduser("~"), ".lanfileshare_shared.json")
         
         self.setup_gui()
         self.get_local_ip()
         self.setup_discovery()
         self.setup_client()
+        
+        # Load previously shared files/folders
+        self.load_shared_config()
     
     def setup_gui(self):
         """Setup the GUI interface"""
@@ -1039,6 +1043,7 @@ class LANFileShareApp:
         
         if added_count > 0:
             self.log(f"Added {added_count} file(s) to share")
+            self.save_shared_config()
     
     def add_folder(self):
         """Add folder and all its contents to share"""
@@ -1061,6 +1066,7 @@ class LANFileShareApp:
         
         if added_count > 0:
             self.log(f"Added {added_count} file(s) from folder: {os.path.basename(folder_path)}")
+            self.save_shared_config()
         else:
             self.log(f"No new files found in folder: {os.path.basename(folder_path)}")
     
@@ -1137,19 +1143,23 @@ class LANFileShareApp:
     def remove_selected(self):
         """Remove selected files from sharing"""
         selected = self.file_tree.selection()
-        for file_id in selected:
-            if file_id in self.shared_files:
-                file_name = self.shared_files[file_id]['name']
-                del self.shared_files[file_id]
-                self.file_tree.delete(file_id)
-                self.log(f"Removed file: {file_name}")
+        if selected:
+            for file_id in selected:
+                if file_id in self.shared_files:
+                    file_name = self.shared_files[file_id]['name']
+                    del self.shared_files[file_id]
+                    self.file_tree.delete(file_id)
+                    self.log(f"Removed file: {file_name}")
+            self.save_shared_config()
     
     def clear_all(self):
         """Clear all shared files"""
-        self.shared_files.clear()
-        for item in self.file_tree.get_children():
-            self.file_tree.delete(item)
-        self.log("Cleared all shared files")
+        if self.shared_files:
+            self.shared_files.clear()
+            for item in self.file_tree.get_children():
+                self.file_tree.delete(item)
+            self.log("Cleared all shared files")
+            self.save_shared_config()
     
     def format_file_size(self, size_bytes):
         """Format file size in human readable format"""
@@ -1170,6 +1180,157 @@ class LANFileShareApp:
         
         # Default location
         return os.path.join(os.path.expanduser("~"), "Downloads", "LANFileShare")
+    
+    def save_shared_config(self):
+        """Save currently shared files/folders to config"""
+        try:
+            config = {
+                'shared_items': [],
+                'last_updated': datetime.now().isoformat()
+            }
+            
+            # Track which base folders we've already saved
+            saved_folders = set()
+            
+            for file_id, file_info in self.shared_files.items():
+                file_path = file_info['path']
+                
+                # Check if this file is part of a folder that was added
+                # by looking at the folder field
+                if file_info.get('folder'):
+                    # This file is part of a shared folder
+                    # Extract the base folder path
+                    full_path = file_info['full_path']
+                    # Get the base folder by removing the relative part
+                    relative_path = file_info['name']
+                    if '/' in relative_path or '\\' in relative_path:
+                        # Calculate base folder
+                        base_folder = os.path.dirname(full_path)
+                        # Walk up to find the root shared folder
+                        folder_parts = file_info['folder'].split('/')
+                        for _ in range(len(folder_parts)):
+                            base_folder = os.path.dirname(base_folder)
+                        
+                        if base_folder not in saved_folders:
+                            saved_folders.add(base_folder)
+                            config['shared_items'].append({
+                                'type': 'folder',
+                                'path': base_folder
+                            })
+                else:
+                    # Individual file
+                    config['shared_items'].append({
+                        'type': 'file',
+                        'path': file_path
+                    })
+            
+            with open(self.config_file, 'w') as f:
+                json.dump(config, f, indent=2)
+            
+            self.log(f"Saved configuration: {len(config['shared_items'])} item(s)")
+            
+        except Exception as e:
+            self.log(f"Error saving shared config: {e}")
+    
+    def load_shared_config(self):
+        """Load previously shared files/folders from config"""
+        try:
+            if not os.path.exists(self.config_file):
+                return
+            
+            with open(self.config_file, 'r') as f:
+                config = json.load(f)
+            
+            shared_items = config.get('shared_items', [])
+            if not shared_items:
+                return
+            
+            self.log(f"Loading {len(shared_items)} previously shared item(s)...")
+            
+            missing_items = []
+            loaded_count = 0
+            
+            for item in shared_items:
+                item_type = item.get('type')
+                item_path = item.get('path')
+                
+                if not os.path.exists(item_path):
+                    missing_items.append(item)
+                    continue
+                
+                if item_type == 'file':
+                    if self._add_single_file(item_path, show_log=False):
+                        loaded_count += 1
+                elif item_type == 'folder':
+                    # Add folder contents
+                    for root, dirs, files in os.walk(item_path):
+                        for filename in files:
+                            file_path = os.path.join(root, filename)
+                            if self._add_single_file(file_path, show_log=False, base_folder=item_path):
+                                loaded_count += 1
+            
+            if loaded_count > 0:
+                self.log(f"Loaded {loaded_count} file(s) from saved configuration")
+            
+            # Handle missing items
+            if missing_items:
+                self.handle_missing_items(missing_items)
+                
+        except Exception as e:
+            self.log(f"Error loading shared config: {e}")
+    
+    def handle_missing_items(self, missing_items):
+        """Handle missing files/folders from saved configuration"""
+        missing_count = len(missing_items)
+        
+        message = f"Found {missing_count} missing item(s) from previous session:\n\n"
+        for item in missing_items[:5]:  # Show first 5
+            message += f"  • {item['type'].title()}: {item['path']}\n"
+        
+        if missing_count > 5:
+            message += f"  ... and {missing_count - 5} more\n"
+        
+        message += "\nWould you like to re-select these items?"
+        
+        response = messagebox.askyesno("Missing Shared Items", message)
+        
+        if response:
+            self.reselect_missing_items(missing_items)
+    
+    def reselect_missing_items(self, missing_items):
+        """Allow user to re-select missing items"""
+        for item in missing_items:
+            item_type = item['type']
+            old_path = item['path']
+            
+            message = f"Original {item_type} not found:\n{old_path}\n\nSelect new location:"
+            messagebox.showinfo("Re-select Item", message)
+            
+            if item_type == 'file':
+                files = filedialog.askopenfilenames(
+                    title=f"Select replacement for: {os.path.basename(old_path)}",
+                    filetypes=[("All files", "*.*")]
+                )
+                for file_path in files:
+                    self._add_single_file(file_path)
+            
+            elif item_type == 'folder':
+                folder_path = filedialog.askdirectory(
+                    title=f"Select replacement for: {os.path.basename(old_path)}"
+                )
+                if folder_path:
+                    self.log(f"Scanning folder: {folder_path}")
+                    added_count = 0
+                    for root, dirs, files in os.walk(folder_path):
+                        for filename in files:
+                            file_path = os.path.join(root, filename)
+                            if self._add_single_file(file_path, show_log=False, base_folder=folder_path):
+                                added_count += 1
+                    if added_count > 0:
+                        self.log(f"Added {added_count} file(s) from folder: {os.path.basename(folder_path)}")
+        
+        # Save updated config
+        self.save_shared_config()
     
     def save_download_directory(self, directory):
         """Save download directory to config file"""
