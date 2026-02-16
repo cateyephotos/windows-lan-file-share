@@ -25,8 +25,14 @@ class NetworkDiscovery:
         self.callbacks = []
     
     def add_callback(self, callback):
-        """Add callback function for server discovery updates"""
+        """Add a callback to be notified when servers are discovered"""
         self.callbacks.append(callback)
+        # If servers were already discovered before this callback was added, notify immediately
+        if self.discovered_servers:
+            try:
+                callback(self.discovered_servers)
+            except Exception as e:
+                print(f"Callback error: {e}")
     
     def notify_callbacks(self):
         """Notify all callbacks about discovered servers"""
