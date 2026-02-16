@@ -215,13 +215,15 @@ class OptimizedHTTPServer:
         """
         from http.server import HTTPServer
         
-        class OptimizedHTTPServer(HTTPServer):
+        outer = OptimizedHTTPServer
+        
+        class _OptimizedHTTPServer(HTTPServer):
             def server_bind(self):
                 """Override to apply socket optimizations"""
-                OptimizedHTTPServer.optimize_socket(self.socket)
+                outer.optimize_socket(self.socket)
                 super().server_bind()
         
-        return OptimizedHTTPServer(server_address, handler_class)
+        return _OptimizedHTTPServer(server_address, handler_class)
 
 class SpeedMonitor:
     """Monitor and report transfer speeds"""
