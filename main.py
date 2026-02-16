@@ -10,6 +10,7 @@ import socket
 import threading
 import json
 import subprocess
+import re
 from pathlib import Path
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
@@ -321,21 +322,47 @@ class FileShareHandler(SimpleHTTPRequestHandler):
         # Load and cache static template files
         if FileShareHandler._template_cache is None:
             static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static')
-            with open(os.path.join(static_dir, 'index.html'), 'r', encoding='utf-8') as f:
-                html_template = f.read()
-            with open(os.path.join(static_dir, 'style.css'), 'r', encoding='utf-8') as f:
-                css_content = f.read()
-            with open(os.path.join(static_dir, 'app.js'), 'r', encoding='utf-8') as f:
-                js_content = f.read()
-            # Inline CSS and JS into the HTML template
-            html_template = html_template.replace('/* __STYLE_CSS__ */', css_content)
-            html_template = html_template.replace('/* __APP_JS__ */', js_content)
-            FileShareHandler._template_cache = html_template
+            try:
+                with open(os.path.join(static_dir, 'index.html'), 'r', encoding='utf-8') as f:
+                    html_template = f.read()
+                with open(os.path.join(static_dir, 'style.css'), 'r', encoding='utf-8') as f:
+                    css_content = f.read()
+                with open(os.path.join(static_dir, 'app.js'), 'r', encoding='utf-8') as f:
+                    js_content = f.read()
+                # Inline CSS and JS into the HTML template
+                html_template = html_template.replace('/* __STYLE_CSS__ */', css_content)
+                html_template = html_template.replace('/* __APP_JS__ */', js_content)
+                FileShareHandler._template_cache = html_template
+            except (FileNotFoundError, OSError, IOError) as e:
+                # Return a user-friendly error page if static files are missing or unreadable
+                import html as html_mod
+                return f"""<!DOCTYPE html>
+<html><head><title>Configuration Error</title></head>
+<body style="font-family: sans-serif; padding: 40px; text-align: center;">
+<h1>Configuration Error</h1>
+<p>Required static files are missing from the <code>static/</code> directory.</p>
+<p>Please ensure these files exist: static/index.html, static/style.css, static/app.js</p>
+<p style="color: #666; font-size: 12px;">Error: {html_mod.escape(str(e))}</p>
+</body></html>"""
 
-        # Substitute data placeholders per-request
+        # Sanitize JSON for safe embedding inside <script> tags.
+        # A filename containing "</script>" would break out of the script block,
+        # enabling XSS. Escaping "</" to "<\\/" is the standard mitigation.
+        files_json = files_json.replace('</', '<\\/')
+        folders_json = folders_json.replace('</', '<\\/')
+
+        # Substitute data placeholders using regex single-pass replacement to prevent
+        # injection attacks where filenames contain placeholder strings like __FOLDERS_JSON__
         html = FileShareHandler._template_cache
-        html = html.replace('__FILES_JSON__', files_json)
-        html = html.replace('__FOLDERS_JSON__', folders_json)
+        substitutions = {
+            '__FILES_JSON__': files_json,
+            '__FOLDERS_JSON__': folders_json
+        }
+        # Build regex pattern that matches any placeholder
+        pattern = re.compile('|'.join(re.escape(k) for k in substitutions.keys()))
+        # Single-pass replacement using a function - each placeholder is replaced only once
+        # and already-substituted content cannot affect subsequent matches
+        html = pattern.sub(lambda m: substitutions[m.group(0)], html)
 
         return html
     

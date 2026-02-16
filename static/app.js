@@ -297,6 +297,10 @@ function filterFiles() {
         var fileModEsc = escapeHtml(file.modified);
         var fileExt = file.extension;
 
+        // Escape for inline onclick: backslashes first, then quotes
+        var fileIdJs = file.id.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+        var fileNameJs = file.name.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+
         if (viewMode === 'grid') {
             div.innerHTML =
                 '<div class="file-icon">' + iconHtml + '</div>' +
@@ -304,7 +308,7 @@ function filterFiles() {
                 '<div class="file-size">' + fileSizeEsc + '</div>' +
                 '<div class="file-actions">' +
                     '<a href="/download/' + fileIdEnc + '" class="action-btn action-download" onclick="event.stopPropagation();">⬇️</a>' +
-                    '<button class="action-btn action-preview" onclick="event.stopPropagation(); openPreview(\'' + file.id.replace(/'/g, "\\'") + '\', \'' + file.name.replace(/'/g, "\\'").replace(/\\/g, '\\\\') + '\', \'' + fileExt + '\')">👁️</button>' +
+                    '<button class="action-btn action-preview" onclick="event.stopPropagation(); openPreview(\'' + fileIdJs + '\', \'' + fileNameJs + '\', \'' + fileExt + '\')">👁️</button>' +
                 '</div>';
         } else {
             div.innerHTML =
@@ -314,7 +318,7 @@ function filterFiles() {
                 '<div class="file-modified">' + fileModEsc + '</div>' +
                 '<div class="file-actions">' +
                     '<a href="/download/' + fileIdEnc + '" class="action-btn action-download" onclick="event.stopPropagation();">⬇️</a>' +
-                    '<button class="action-btn action-preview" onclick="event.stopPropagation(); openPreview(\'' + file.id.replace(/'/g, "\\'") + '\', \'' + file.name.replace(/'/g, "\\'").replace(/\\/g, '\\\\') + '\', \'' + fileExt + '\')">👁️</button>' +
+                    '<button class="action-btn action-preview" onclick="event.stopPropagation(); openPreview(\'' + fileIdJs + '\', \'' + fileNameJs + '\', \'' + fileExt + '\')">👁️</button>' +
                 '</div>';
         }
 
