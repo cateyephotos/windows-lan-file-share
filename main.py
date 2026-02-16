@@ -483,7 +483,8 @@ class LANFileShareApp:
         """Refresh network discovery"""
         if self.discovery:
             self.discovery.cleanup_old_servers()
-            self.log("Refreshing network discovery...")
+            self.discovery.trigger_manual_scan()
+            self.log("Scanning network for servers...")
     
     def connect_to_server(self):
         """Connect to selected discovered server"""

@@ -134,27 +134,63 @@ class NetworkDiscovery:
         except Exception as e:
             print(f"Error processing broadcast: {e}")
     
+    def trigger_manual_scan(self):
+        """Trigger an immediate network scan (non-blocking)"""
+        if not self.is_running:
+            return
+        
+        scan_thread = threading.Thread(target=self._perform_quick_scan, daemon=True)
+        scan_thread.start()
+    
+    def _perform_quick_scan(self):
+        """Perform a quick scan using ARP table and targeted checks"""
+        try:
+            print("[Discovery] Starting network scan...")
+            
+            # First, try to get hosts from ARP table
+            active_hosts = NetworkScanner.get_active_hosts()
+            
+            if active_hosts:
+                print(f"[Discovery] Scanning {len(active_hosts)} hosts from ARP table...")
+                checked_count = 0
+                for i, ip in enumerate(active_hosts):
+                    if not self.is_running:
+                        break
+                    self._check_server(ip, self.port)
+                    checked_count += 1
+                print(f"[Discovery] Scan complete - checked {checked_count} hosts")
+            else:
+                # Fallback to subnet scan if ARP table is empty
+                print("[Discovery] ARP table empty, performing subnet scan...")
+                self._scan_subnet()
+            
+        except Exception as e:
+            print(f"[Discovery] Scan error: {e}")
+    
+    def _scan_subnet(self):
+        """Scan the local subnet for servers"""
+        local_ip = self._get_local_ip()
+        if local_ip and local_ip != "127.0.0.1":
+            network_parts = local_ip.split('.')
+            network_base = f"{network_parts[0]}.{network_parts[1]}.{network_parts[2]}"
+            
+            for i in range(1, 255):
+                if not self.is_running:
+                    break
+                    
+                target_ip = f"{network_base}.{i}"
+                if target_ip != local_ip:
+                    self._check_server(target_ip, self.port)
+                    
+                # Small delay to avoid overwhelming the network
+                time.sleep(0.1)
+    
     def _scan_network(self):
         """Scan the local network for file share servers"""
         while self.is_running:
             try:
-                # Get local network range
-                local_ip = self._get_local_ip()
-                if local_ip and local_ip != "127.0.0.1":
-                    network_parts = local_ip.split('.')
-                    network_base = f"{network_parts[0]}.{network_parts[1]}.{network_parts[2]}"
-                    
-                    # Scan common ports on the local network
-                    for i in range(1, 255):
-                        if not self.is_running:
-                            break
-                            
-                        target_ip = f"{network_base}.{i}"
-                        if target_ip != local_ip:
-                            self._check_server(target_ip, self.port)
-                            
-                        # Small delay to avoid overwhelming the network
-                        time.sleep(0.1)
+                # Perform quick scan using ARP table
+                self._perform_quick_scan()
                 
                 # Wait before next scan
                 time.sleep(300)  # Scan every 5 minutes
@@ -173,6 +209,7 @@ class NetworkDiscovery:
             
             if result == 0:
                 server_key = f"{ip}:{port}"
+                print(f"[Discovery] Found server at {ip}:{port}")
                 self.discovered_servers[server_key] = {
                     'ip': ip,
                     'port': port,
@@ -182,7 +219,8 @@ class NetworkDiscovery:
                 }
                 self.notify_callbacks()
                 
-        except Exception:
+        except Exception as e:
+            # Silently ignore connection errors during scan
             pass
     
     def _get_local_ip(self):
