@@ -322,10 +322,13 @@ class FileShareHandler(SimpleHTTPRequestHandler):
         .btn-secondary {{ background: #6c757d; color: white; }}
         .btn-secondary:hover {{ background: #5a6268; }}
         
-        .breadcrumb {{ background: #e9ecef; padding: 10px 15px; border-radius: 4px; margin-bottom: 15px; font-size: 14px; }}
-        .breadcrumb a {{ color: #0078d4; text-decoration: none; }}
+        .breadcrumb {{ background: #e9ecef; padding: 10px 15px; border-radius: 4px; margin-bottom: 15px; font-size: 14px; display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }}
+        .breadcrumb a {{ color: #0078d4; text-decoration: none; cursor: pointer; }}
         .breadcrumb a:hover {{ text-decoration: underline; }}
-        .breadcrumb span {{ margin: 0 5px; color: #6c757d; }}
+        .breadcrumb span {{ margin: 0 2px; color: #6c757d; }}
+        .btn-up {{ padding: 4px 10px; font-size: 13px; background: #e9ecef; border: 1px solid #ced4da; border-radius: 3px; cursor: pointer; margin-right: 8px; }}
+        .btn-up:hover {{ background: #dee2e6; }}
+        .btn-up:disabled {{ opacity: 0.4; cursor: default; }}
         
         .stats {{ color: #666; font-size: 14px; margin-bottom: 10px; }}
         
@@ -376,6 +379,7 @@ class FileShareHandler(SimpleHTTPRequestHandler):
             </div>
             
             <div id="breadcrumb" class="breadcrumb">
+                <button class="btn-up" id="btnUp" onclick="goUp()" disabled>⬆️ Up</button>
                 <a href="#" onclick="navigateToFolder(''); return false;">🏠 Home</a>
             </div>
             
@@ -398,7 +402,7 @@ class FileShareHandler(SimpleHTTPRequestHandler):
         const allFiles = {files_json};
         const allFolders = {folders_json};
         let currentFolder = '';
-        
+
         const fileTypeMap = {{
             'image': ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.svg', '.ico'],
             'video': ['.mp4', '.avi', '.mkv', '.mov', '.wmv', '.flv', '.webm'],
@@ -406,7 +410,13 @@ class FileShareHandler(SimpleHTTPRequestHandler):
             'document': ['.pdf', '.doc', '.docx', '.txt', '.rtf', '.odt', '.xls', '.xlsx', '.ppt', '.pptx'],
             'archive': ['.zip', '.rar', '.7z', '.tar', '.gz', '.bz2']
         }};
-        
+
+        function escapeHtml(str) {{
+            const div = document.createElement('div');
+            div.textContent = str;
+            return div.innerHTML;
+        }}
+
         function getFileIcon(extension) {{
             if (fileTypeMap.image.includes(extension)) return '🖼️';
             if (fileTypeMap.video.includes(extension)) return '🎬';
@@ -415,65 +425,104 @@ class FileShareHandler(SimpleHTTPRequestHandler):
             if (fileTypeMap.archive.includes(extension)) return '📦';
             return '📄';
         }}
-        
+
         function getFileType(extension) {{
             for (let [type, exts] of Object.entries(fileTypeMap)) {{
                 if (exts.includes(extension)) return type;
             }}
             return 'other';
         }}
-        
+
         function navigateToFolder(folder) {{
             currentFolder = folder;
             updateBreadcrumb();
             filterFiles();
+            // Scroll to top when navigating
+            window.scrollTo(0, 0);
         }}
-        
+
+        function goUp() {{
+            if (!currentFolder) return;
+            const lastSlash = currentFolder.lastIndexOf('/');
+            if (lastSlash === -1) {{
+                navigateToFolder('');
+            }} else {{
+                navigateToFolder(currentFolder.substring(0, lastSlash));
+            }}
+        }}
+
         function updateBreadcrumb() {{
             const breadcrumb = document.getElementById('breadcrumb');
-            let html = '<a href="#" onclick="navigateToFolder(\'\'); return false;">🏠 Home</a>';
-            
+            const btnUp = document.getElementById('btnUp');
+
+            // Update the Up button state
+            if (btnUp) {{
+                btnUp.disabled = !currentFolder;
+            }}
+
+            // Build breadcrumb using DOM elements to avoid quote/XSS issues
+            // Keep the Up button, clear the rest
+            while (breadcrumb.children.length > 1) {{
+                breadcrumb.removeChild(breadcrumb.lastChild);
+            }}
+
+            const homeLink = document.createElement('a');
+            homeLink.href = '#';
+            homeLink.textContent = '🏠 Home';
+            homeLink.onclick = function(e) {{ e.preventDefault(); navigateToFolder(''); }};
+            breadcrumb.appendChild(homeLink);
+
             if (currentFolder) {{
                 const parts = currentFolder.split('/');
                 let path = '';
                 for (let part of parts) {{
                     path += (path ? '/' : '') + part;
-                    const currentPath = path;
-                    html += ` <span>/</span> <a href="#" onclick="navigateToFolder('${{currentPath}}'); return false;">${{part}}</a>`;
+
+                    const sep = document.createElement('span');
+                    sep.textContent = '/';
+                    breadcrumb.appendChild(sep);
+
+                    const link = document.createElement('a');
+                    link.href = '#';
+                    link.textContent = part;
+                    const navPath = path;
+                    link.onclick = function(e) {{ e.preventDefault(); navigateToFolder(navPath); }};
+                    breadcrumb.appendChild(link);
                 }}
             }}
-            
-            breadcrumb.innerHTML = html;
         }}
-        
+
         function filterFiles() {{
             const searchTerm = document.getElementById('searchBox').value.toLowerCase();
             const typeFilter = document.getElementById('typeFilter').value;
-            
+
             const container = document.getElementById('fileContainer');
             container.innerHTML = '';
-            
+
+            // Use DocumentFragment for batch DOM insertion (performance)
+            const fragment = document.createDocumentFragment();
+
             // Get subfolders in current folder
             const subfolders = allFolders.filter(f => {{
                 if (!currentFolder) {{
                     return !f.includes('/') && f !== '';
                 }} else {{
-                    return f.startsWith(currentFolder + '/') && 
+                    return f.startsWith(currentFolder + '/') &&
                            f.split('/').length === currentFolder.split('/').length + 1;
                 }}
             }});
-            
+
             // Get files in current folder
             const filesInFolder = allFiles.filter(f => f.folder === currentFolder);
-            
+
             // Apply filters
             let filteredFiles = filesInFolder.filter(f => {{
                 const matchesSearch = f.name.toLowerCase().includes(searchTerm);
                 const matchesType = !typeFilter || getFileType(f.extension) === typeFilter;
                 return matchesSearch && matchesType;
             }});
-            
-            // Show folders
+
+            // Show folders using safe DOM construction
             subfolders.forEach(folder => {{
                 const folderName = folder.split('/').pop();
                 const div = document.createElement('div');
@@ -481,44 +530,47 @@ class FileShareHandler(SimpleHTTPRequestHandler):
                 div.onclick = () => navigateToFolder(folder);
                 div.innerHTML = `
                     <div class="file-icon">📁</div>
-                    <div class="file-name">${{folderName}}</div>
+                    <div class="file-name">${{escapeHtml(folderName)}}</div>
                     <div class="file-size"></div>
                     <div class="file-modified"></div>
                     <div class="file-actions"></div>
                 `;
-                container.appendChild(div);
+                fragment.appendChild(div);
             }});
-            
-            // Show files
+
+            // Show files with escaped HTML
             filteredFiles.forEach(file => {{
                 const div = document.createElement('div');
                 div.className = 'file-item';
                 div.innerHTML = `
                     <div class="file-icon">${{getFileIcon(file.extension)}}</div>
-                    <div class="file-name" title="${{file.name}}">${{file.name}}</div>
-                    <div class="file-size">${{file.size}}</div>
-                    <div class="file-modified">${{file.modified}}</div>
+                    <div class="file-name" title="${{escapeHtml(file.name)}}">${{escapeHtml(file.name)}}</div>
+                    <div class="file-size">${{escapeHtml(file.size)}}</div>
+                    <div class="file-modified">${{escapeHtml(file.modified)}}</div>
                     <div class="file-actions">
-                        <a href="/download/${{file.id}}" class="action-btn action-download">⬇️</a>
-                        <a href="/files/${{file.id}}" target="_blank" class="action-btn action-preview">👁️</a>
+                        <a href="/download/${{encodeURIComponent(file.id)}}" class="action-btn action-download">⬇️</a>
+                        <a href="/files/${{encodeURIComponent(file.id)}}" target="_blank" class="action-btn action-preview">👁️</a>
                     </div>
                 `;
-                container.appendChild(div);
+                fragment.appendChild(div);
             }});
-            
+
+            // Batch append all items at once (single reflow)
+            container.appendChild(fragment);
+
             // Update stats
             const totalItems = subfolders.length + filteredFiles.length;
             const totalSize = filteredFiles.reduce((sum, f) => sum + f.sizeBytes, 0);
             const sizeStr = formatBytes(totalSize);
-            
-            document.getElementById('stats').textContent = 
+
+            document.getElementById('stats').textContent =
                 `${{totalItems}} item(s) | ${{filteredFiles.length}} file(s) | Total: ${{sizeStr}}`;
-            
+
             if (totalItems === 0) {{
                 container.innerHTML = '<div class="no-files">No files found</div>';
             }}
         }}
-        
+
         function formatBytes(bytes) {{
             if (bytes === 0) return '0 B';
             const k = 1024;
@@ -526,13 +578,25 @@ class FileShareHandler(SimpleHTTPRequestHandler):
             const i = Math.floor(Math.log(bytes) / Math.log(k));
             return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
         }}
-        
+
         function clearFilters() {{
             document.getElementById('searchBox').value = '';
             document.getElementById('typeFilter').value = '';
             filterFiles();
         }}
-        
+
+        // Keyboard navigation
+        document.addEventListener('keydown', function(e) {{
+            if (e.altKey && e.key === 'ArrowUp') {{
+                e.preventDefault();
+                goUp();
+            }}
+            if (e.key === 'Backspace' && document.activeElement.tagName !== 'INPUT') {{
+                e.preventDefault();
+                goUp();
+            }}
+        }});
+
         // Initialize
         filterFiles();
     </script>
