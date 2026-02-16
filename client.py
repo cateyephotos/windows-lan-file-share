@@ -36,7 +36,43 @@ class FileShareClient:
     def fetch_file_list(self, server_url, token=None):
         """Fetch list of files from a remote server"""
         try:
-            # Parse the HTML response to extract file information
+            # Use JSON API endpoint for reliable file list retrieval
+            api_url = server_url.rstrip('/') + '/api/files'
+            
+            headers = {}
+            if token:
+                headers['Authorization'] = f'Bearer {token}'
+            
+            req = urllib.request.Request(api_url, headers=headers)
+            
+            with urllib.request.urlopen(req, timeout=10) as response:
+                json_content = response.read().decode('utf-8')
+                
+                # Parse JSON response
+                import json
+                files = json.loads(json_content)
+                return files
+                
+        except urllib.error.HTTPError as e:
+            if e.code == 401:
+                raise Exception("Authentication required - token needed")
+            elif e.code == 403:
+                raise Exception("Access denied")
+            elif e.code == 404:
+                # Fallback to HTML parsing for older servers
+                return self._fetch_file_list_from_html(server_url, token)
+            else:
+                raise Exception(f"HTTP Error {e.code}: {e.reason}")
+        except urllib.error.URLError as e:
+            raise Exception(f"Connection error: {str(e.reason)}")
+        except json.JSONDecodeError as e:
+            raise Exception(f"Invalid JSON response: {str(e)}")
+        except Exception as e:
+            raise Exception(f"Failed to fetch file list: {str(e)}")
+    
+    def _fetch_file_list_from_html(self, server_url, token=None):
+        """Fallback method: Parse file information from HTML response (for older servers)"""
+        try:
             headers = {}
             if token:
                 headers['Authorization'] = f'Bearer {token}'
@@ -46,57 +82,39 @@ class FileShareClient:
             with urllib.request.urlopen(req, timeout=10) as response:
                 html_content = response.read().decode('utf-8')
                 
-                # Parse file list from HTML
-                files = self._parse_file_list_from_html(html_content)
+                files = []
+                import re
+                
+                # Find all download links
+                download_pattern = r'/download/([a-f0-9\-]+)'
+                download_matches = re.findall(download_pattern, html_content)
+                
+                # Find file names (look for patterns between specific HTML tags)
+                name_pattern = r'<div class="file-name"[^>]*>([^<]+)</div>'
+                name_matches = re.findall(name_pattern, html_content)
+                
+                # Find file sizes
+                size_pattern = r'<div class="file-size">([^<]+)</div>'
+                size_matches = re.findall(size_pattern, html_content)
+                
+                # Find modified dates
+                modified_pattern = r'<div class="file-modified">([^<]+)</div>'
+                modified_matches = re.findall(modified_pattern, html_content)
+                
+                # Combine the information
+                for i, file_id in enumerate(download_matches):
+                    file_info = {
+                        'id': file_id,
+                        'name': name_matches[i].strip() if i < len(name_matches) else f"file_{i}",
+                        'size': size_matches[i].strip() if i < len(size_matches) else "Unknown",
+                        'modified': modified_matches[i].strip() if i < len(modified_matches) else "Unknown"
+                    }
+                    files.append(file_info)
+                
                 return files
                 
-        except urllib.error.HTTPError as e:
-            if e.code == 401:
-                raise Exception("Authentication required - token needed")
-            elif e.code == 403:
-                raise Exception("Access denied")
-            else:
-                raise Exception(f"HTTP Error {e.code}: {e.reason}")
-        except urllib.error.URLError as e:
-            raise Exception(f"Connection error: {str(e.reason)}")
         except Exception as e:
-            raise Exception(f"Failed to fetch file list: {str(e)}")
-    
-    def _parse_file_list_from_html(self, html_content):
-        """Parse file information from HTML response"""
-        files = []
-        
-        # Simple HTML parsing to extract file information
-        # Look for download links in the format /download/{file_id}
-        import re
-        
-        # Find all download links
-        download_pattern = r'/download/([a-f0-9\-]+)'
-        download_matches = re.findall(download_pattern, html_content)
-        
-        # Find file names (look for patterns between specific HTML tags)
-        name_pattern = r'<div class="file-name">(?:📄 )?([^<]+)</div>'
-        name_matches = re.findall(name_pattern, html_content)
-        
-        # Find file sizes
-        size_pattern = r'📊 Size: ([^|]+)\|'
-        size_matches = re.findall(size_pattern, html_content)
-        
-        # Find modified dates
-        modified_pattern = r'🕒 Modified: ([^<]+)'
-        modified_matches = re.findall(modified_pattern, html_content)
-        
-        # Combine the information
-        for i, file_id in enumerate(download_matches):
-            file_info = {
-                'id': file_id,
-                'name': name_matches[i].strip() if i < len(name_matches) else f"file_{i}",
-                'size': size_matches[i].strip() if i < len(size_matches) else "Unknown",
-                'modified': modified_matches[i].strip() if i < len(modified_matches) else "Unknown"
-            }
-            files.append(file_info)
-        
-        return files
+            raise Exception(f"Failed to parse HTML file list: {str(e)}")
     
     def download_file(self, server_url, file_id, file_name, save_directory, token=None, file_size=None):
         """Download a file from a remote server (uses multi-threading for large files)"""

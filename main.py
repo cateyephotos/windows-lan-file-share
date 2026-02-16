@@ -59,6 +59,8 @@ class FileShareHandler(SimpleHTTPRequestHandler):
     def do_GET(self):
         if self.path == '/':
             self.serve_file_list()
+        elif self.path == '/api/files':
+            self.serve_file_list_json()
         elif self.path.startswith('/download/'):
             self.serve_file_download()
         elif self.path.startswith('/files/'):
@@ -118,12 +120,39 @@ class FileShareHandler(SimpleHTTPRequestHandler):
             super().do_HEAD()
     
     def serve_file_list(self):
-        """Serve the file listing page"""
-        html_content = self.generate_file_list_html()
+        """Serve the file list page"""
+        html = self.generate_file_list_html()
         self.send_response(200)
         self.send_header('Content-type', 'text/html')
+        self.send_header('Content-Length', str(len(html.encode('utf-8'))))
         self.end_headers()
-        self.wfile.write(html_content.encode('utf-8'))
+        self.wfile.write(html.encode('utf-8'))
+    
+    def serve_file_list_json(self):
+        """Serve file list as JSON for API clients"""
+        import json
+        
+        # Build file list
+        files = []
+        for file_id, file_info in self.shared_files.items():
+            files.append({
+                'id': file_id,
+                'name': file_info.get('basename', file_info['name']),
+                'size': file_info['size'],
+                'size_bytes': file_info['size_bytes'],
+                'modified': file_info['modified'],
+                'folder': file_info.get('folder', ''),
+                'extension': file_info.get('extension', '')
+            })
+        
+        json_data = json.dumps(files, indent=2)
+        
+        self.send_response(200)
+        self.send_header('Content-type', 'application/json')
+        self.send_header('Content-Length', str(len(json_data.encode('utf-8'))))
+        self.send_header('Access-Control-Allow-Origin', '*')  # Allow CORS
+        self.end_headers()
+        self.wfile.write(json_data.encode('utf-8'))
     
     def serve_file_download(self):
         """Handle file download requests with chunked transfer and Range support for multi-threading"""
