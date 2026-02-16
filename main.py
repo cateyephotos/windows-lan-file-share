@@ -243,54 +243,270 @@ class FileShareHandler(SimpleHTTPRequestHandler):
             self.send_error(404, "File not found")
     
     def generate_file_list_html(self):
-        """Generate HTML page for file listing"""
-        html = """
+        """Generate enhanced HTML page with filtering and folder navigation"""
+        
+        # Build folder structure
+        folders = set()
+        for file_info in self.shared_files.values():
+            if file_info.get('folder'):
+                folders.add(file_info['folder'])
+                # Add parent folders
+                parts = file_info['folder'].split('/')
+                for i in range(1, len(parts)):
+                    folders.add('/'.join(parts[:i]))
+        
+        # Convert files to JSON for JavaScript
+        import json
+        files_json = json.dumps([{
+            'id': f['id'],
+            'name': f.get('basename', f['name']),
+            'fullPath': f['name'],
+            'folder': f.get('folder', ''),
+            'extension': f.get('extension', ''),
+            'size': f['size'],
+            'sizeBytes': f['size_bytes'],
+            'modified': f['modified']
+        } for f in self.shared_files.values()])
+        
+        folders_json = json.dumps(sorted(list(folders)))
+        
+        html = f"""
 <!DOCTYPE html>
 <html>
 <head>
     <title>LAN File Share</title>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
-        body { font-family: Arial, sans-serif; margin: 40px; background-color: #f5f5f5; }
-        .container { max-width: 800px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-        h1 { color: #333; text-align: center; margin-bottom: 30px; }
-        .file-item { border: 1px solid #ddd; padding: 15px; margin: 10px 0; border-radius: 5px; background: #fafafa; }
-        .file-item:hover { background: #f0f0f0; }
-        .file-name { font-weight: bold; font-size: 16px; color: #2c3e50; }
-        .file-info { color: #666; font-size: 14px; margin-top: 5px; }
-        .download-btn { background: #3498db; color: white; padding: 8px 16px; text-decoration: none; border-radius: 4px; display: inline-block; margin-top: 10px; }
-        .download-btn:hover { background: #2980b9; }
-        .preview-btn { background: #27ae60; color: white; padding: 8px 16px; text-decoration: none; border-radius: 4px; display: inline-block; margin-top: 10px; margin-left: 10px; }
-        .preview-btn:hover { background: #229954; }
-        .no-files { text-align: center; color: #666; font-style: italic; }
+        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+        body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f5f5f5; }}
+        .container {{ max-width: 1200px; margin: 0 auto; padding: 20px; }}
+        .header {{ background: white; padding: 20px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }}
+        h1 {{ color: #333; font-size: 24px; margin-bottom: 15px; }}
+        
+        .toolbar {{ display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 15px; }}
+        .search-box {{ flex: 1; min-width: 200px; padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; }}
+        .filter-select {{ padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; background: white; }}
+        .btn {{ padding: 10px 16px; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; transition: all 0.2s; }}
+        .btn-primary {{ background: #0078d4; color: white; }}
+        .btn-primary:hover {{ background: #106ebe; }}
+        .btn-secondary {{ background: #6c757d; color: white; }}
+        .btn-secondary:hover {{ background: #5a6268; }}
+        
+        .breadcrumb {{ background: #e9ecef; padding: 10px 15px; border-radius: 4px; margin-bottom: 15px; font-size: 14px; }}
+        .breadcrumb a {{ color: #0078d4; text-decoration: none; }}
+        .breadcrumb a:hover {{ text-decoration: underline; }}
+        .breadcrumb span {{ margin: 0 5px; color: #6c757d; }}
+        
+        .stats {{ color: #666; font-size: 14px; margin-bottom: 10px; }}
+        
+        .file-list {{ background: white; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); overflow: hidden; }}
+        .file-header {{ display: grid; grid-template-columns: 40px 1fr 120px 150px 100px; gap: 10px; padding: 12px 15px; background: #f8f9fa; border-bottom: 2px solid #dee2e6; font-weight: 600; font-size: 13px; color: #495057; }}
+        
+        .file-item, .folder-item {{ display: grid; grid-template-columns: 40px 1fr 120px 150px 100px; gap: 10px; padding: 12px 15px; border-bottom: 1px solid #e9ecef; align-items: center; cursor: pointer; transition: background 0.2s; }}
+        .file-item:hover, .folder-item:hover {{ background: #f8f9fa; }}
+        .file-item.hidden, .folder-item.hidden {{ display: none; }}
+        
+        .file-icon {{ font-size: 24px; text-align: center; }}
+        .file-name {{ font-size: 14px; color: #333; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
+        .file-size {{ font-size: 13px; color: #666; }}
+        .file-modified {{ font-size: 13px; color: #666; }}
+        .file-actions {{ display: flex; gap: 5px; }}
+        .action-btn {{ padding: 5px 10px; font-size: 12px; border: none; border-radius: 3px; cursor: pointer; text-decoration: none; display: inline-block; }}
+        .action-download {{ background: #0078d4; color: white; }}
+        .action-download:hover {{ background: #106ebe; }}
+        .action-preview {{ background: #28a745; color: white; }}
+        .action-preview:hover {{ background: #218838; }}
+        
+        .no-files {{ text-align: center; padding: 40px; color: #666; font-size: 16px; }}
+        .folder-item .file-name {{ color: #0078d4; font-weight: 500; }}
+        
+        @media (max-width: 768px) {{
+            .file-header, .file-item, .folder-item {{ grid-template-columns: 1fr; }}
+            .file-size, .file-modified {{ display: none; }}
+        }}
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>📁 LAN File Share</h1>
-"""
-        
-        if not self.shared_files:
-            html += '<div class="no-files">No files are currently being shared.</div>'
-        else:
-            for file_id, file_info in self.shared_files.items():
-                filename = file_info['name']
-                size = file_info['size']
-                modified = file_info['modified']
-                
-                html += f"""
-        <div class="file-item">
-            <div class="file-name">{filename}</div>
-            <div class="file-info">
-                Size: {size} | Modified: {modified}
+        <div class="header">
+            <h1>📁 LAN File Share</h1>
+            
+            <div class="toolbar">
+                <input type="text" id="searchBox" class="search-box" placeholder="🔍 Search files..." oninput="filterFiles()">
+                <select id="typeFilter" class="filter-select" onchange="filterFiles()">
+                    <option value="">All Types</option>
+                    <option value="image">Images</option>
+                    <option value="video">Videos</option>
+                    <option value="audio">Audio</option>
+                    <option value="document">Documents</option>
+                    <option value="archive">Archives</option>
+                    <option value="other">Other</option>
+                </select>
+                <button class="btn btn-secondary" onclick="clearFilters()">Clear Filters</button>
             </div>
-            <a href="/download/{file_id}" class="download-btn">⬇️ Download</a>
-            <a href="/files/{file_id}" class="preview-btn" target="_blank">👁️ Preview</a>
+            
+            <div id="breadcrumb" class="breadcrumb">
+                <a href="#" onclick="navigateToFolder(''); return false;">🏠 Home</a>
+            </div>
+            
+            <div id="stats" class="stats"></div>
         </div>
-"""
         
-        html += """
+        <div class="file-list">
+            <div class="file-header">
+                <div></div>
+                <div>Name</div>
+                <div>Size</div>
+                <div>Modified</div>
+                <div>Actions</div>
+            </div>
+            <div id="fileContainer"></div>
+        </div>
     </div>
+    
+    <script>
+        const allFiles = {files_json};
+        const allFolders = {folders_json};
+        let currentFolder = '';
+        
+        const fileTypeMap = {{
+            'image': ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.svg', '.ico'],
+            'video': ['.mp4', '.avi', '.mkv', '.mov', '.wmv', '.flv', '.webm'],
+            'audio': ['.mp3', '.wav', '.flac', '.aac', '.ogg', '.wma', '.m4a'],
+            'document': ['.pdf', '.doc', '.docx', '.txt', '.rtf', '.odt', '.xls', '.xlsx', '.ppt', '.pptx'],
+            'archive': ['.zip', '.rar', '.7z', '.tar', '.gz', '.bz2']
+        }};
+        
+        function getFileIcon(extension) {{
+            if (fileTypeMap.image.includes(extension)) return '🖼️';
+            if (fileTypeMap.video.includes(extension)) return '🎬';
+            if (fileTypeMap.audio.includes(extension)) return '🎵';
+            if (fileTypeMap.document.includes(extension)) return '📄';
+            if (fileTypeMap.archive.includes(extension)) return '📦';
+            return '📄';
+        }}
+        
+        function getFileType(extension) {{
+            for (let [type, exts] of Object.entries(fileTypeMap)) {{
+                if (exts.includes(extension)) return type;
+            }}
+            return 'other';
+        }}
+        
+        function navigateToFolder(folder) {{
+            currentFolder = folder;
+            updateBreadcrumb();
+            filterFiles();
+        }}
+        
+        function updateBreadcrumb() {{
+            const breadcrumb = document.getElementById('breadcrumb');
+            let html = '<a href="#" onclick="navigateToFolder(\'\'); return false;">🏠 Home</a>';
+            
+            if (currentFolder) {{
+                const parts = currentFolder.split('/');
+                let path = '';
+                for (let part of parts) {{
+                    path += (path ? '/' : '') + part;
+                    const currentPath = path;
+                    html += ` <span>/</span> <a href="#" onclick="navigateToFolder('${{currentPath}}'); return false;">${{part}}</a>`;
+                }}
+            }}
+            
+            breadcrumb.innerHTML = html;
+        }}
+        
+        function filterFiles() {{
+            const searchTerm = document.getElementById('searchBox').value.toLowerCase();
+            const typeFilter = document.getElementById('typeFilter').value;
+            
+            const container = document.getElementById('fileContainer');
+            container.innerHTML = '';
+            
+            // Get subfolders in current folder
+            const subfolders = allFolders.filter(f => {{
+                if (!currentFolder) {{
+                    return !f.includes('/') && f !== '';
+                }} else {{
+                    return f.startsWith(currentFolder + '/') && 
+                           f.split('/').length === currentFolder.split('/').length + 1;
+                }}
+            }});
+            
+            // Get files in current folder
+            const filesInFolder = allFiles.filter(f => f.folder === currentFolder);
+            
+            // Apply filters
+            let filteredFiles = filesInFolder.filter(f => {{
+                const matchesSearch = f.name.toLowerCase().includes(searchTerm);
+                const matchesType = !typeFilter || getFileType(f.extension) === typeFilter;
+                return matchesSearch && matchesType;
+            }});
+            
+            // Show folders
+            subfolders.forEach(folder => {{
+                const folderName = folder.split('/').pop();
+                const div = document.createElement('div');
+                div.className = 'folder-item';
+                div.onclick = () => navigateToFolder(folder);
+                div.innerHTML = `
+                    <div class="file-icon">📁</div>
+                    <div class="file-name">${{folderName}}</div>
+                    <div class="file-size"></div>
+                    <div class="file-modified"></div>
+                    <div class="file-actions"></div>
+                `;
+                container.appendChild(div);
+            }});
+            
+            // Show files
+            filteredFiles.forEach(file => {{
+                const div = document.createElement('div');
+                div.className = 'file-item';
+                div.innerHTML = `
+                    <div class="file-icon">${{getFileIcon(file.extension)}}</div>
+                    <div class="file-name" title="${{file.name}}">${{file.name}}</div>
+                    <div class="file-size">${{file.size}}</div>
+                    <div class="file-modified">${{file.modified}}</div>
+                    <div class="file-actions">
+                        <a href="/download/${{file.id}}" class="action-btn action-download">⬇️</a>
+                        <a href="/files/${{file.id}}" target="_blank" class="action-btn action-preview">👁️</a>
+                    </div>
+                `;
+                container.appendChild(div);
+            }});
+            
+            // Update stats
+            const totalItems = subfolders.length + filteredFiles.length;
+            const totalSize = filteredFiles.reduce((sum, f) => sum + f.sizeBytes, 0);
+            const sizeStr = formatBytes(totalSize);
+            
+            document.getElementById('stats').textContent = 
+                `${{totalItems}} item(s) | ${{filteredFiles.length}} file(s) | Total: ${{sizeStr}}`;
+            
+            if (totalItems === 0) {{
+                container.innerHTML = '<div class="no-files">No files found</div>';
+            }}
+        }}
+        
+        function formatBytes(bytes) {{
+            if (bytes === 0) return '0 B';
+            const k = 1024;
+            const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
+        }}
+        
+        function clearFilters() {{
+            document.getElementById('searchBox').value = '';
+            document.getElementById('typeFilter').value = '';
+            filterFiles();
+        }}
+        
+        // Initialize
+        filterFiles();
+    </script>
 </body>
 </html>
 """
@@ -807,7 +1023,7 @@ class LANFileShareApp:
         for root, dirs, files in os.walk(folder_path):
             for filename in files:
                 file_path = os.path.join(root, filename)
-                if self._add_single_file(file_path, show_log=False):
+                if self._add_single_file(file_path, show_log=False, base_folder=folder_path):
                     added_count += 1
         
         if added_count > 0:
@@ -815,7 +1031,7 @@ class LANFileShareApp:
         else:
             self.log(f"No new files found in folder: {os.path.basename(folder_path)}")
     
-    def _add_single_file(self, file_path, show_log=True):
+    def _add_single_file(self, file_path, show_log=True, base_folder=None):
         """Add a single file to the shared files list with size validation"""
         try:
             # Check if file already exists
@@ -842,13 +1058,25 @@ class LANFileShareApp:
             
             file_id = str(uuid.uuid4())
             
-            # Get relative display name (show folder structure)
-            display_name = os.path.basename(file_path)
+            # Get relative path for folder structure
+            if base_folder and file_path.startswith(base_folder):
+                relative_path = os.path.relpath(file_path, base_folder)
+                display_name = relative_path.replace('\\', '/')
+                folder_path = os.path.dirname(relative_path).replace('\\', '/') if os.path.dirname(relative_path) != '.' else ''
+            else:
+                display_name = os.path.basename(file_path)
+                folder_path = ''
+            
+            # Get file extension
+            _, ext = os.path.splitext(file_path)
             
             file_info = {
                 'id': file_id,
                 'name': display_name,
+                'basename': os.path.basename(file_path),
                 'path': file_path,
+                'folder': folder_path,
+                'extension': ext.lower(),
                 'size': format_file_size(file_size_bytes),
                 'size_bytes': file_size_bytes,
                 'modified': datetime.fromtimestamp(file_stat.st_mtime).strftime('%Y-%m-%d %H:%M:%S'),
