@@ -28,12 +28,53 @@ from file_verification import FileVerifier, verify_download
 
 class FileShareHandler(SimpleHTTPRequestHandler):
     """Custom HTTP handler for file sharing"""
-    
+
     connection_callback = None  # Class variable for connection notifications
-    
+    _template_cache = None  # Cache for static file template
+
+    # MIME type map for file preview serving
+    CONTENT_TYPE_MAP = {
+        # Text / Code
+        '.txt': 'text/plain', '.py': 'text/plain', '.js': 'text/plain',
+        '.html': 'text/plain', '.css': 'text/plain', '.json': 'text/plain',
+        '.xml': 'text/plain', '.md': 'text/plain', '.yaml': 'text/plain',
+        '.yml': 'text/plain', '.toml': 'text/plain', '.ini': 'text/plain',
+        '.cfg': 'text/plain', '.conf': 'text/plain',
+        '.c': 'text/plain', '.cpp': 'text/plain', '.h': 'text/plain',
+        '.hpp': 'text/plain', '.java': 'text/plain', '.go': 'text/plain',
+        '.rs': 'text/plain', '.rb': 'text/plain', '.php': 'text/plain',
+        '.sh': 'text/plain', '.bat': 'text/plain', '.ps1': 'text/plain',
+        '.ts': 'text/plain', '.tsx': 'text/plain', '.jsx': 'text/plain',
+        '.vue': 'text/plain', '.svelte': 'text/plain',
+        '.csv': 'text/plain', '.log': 'text/plain', '.sql': 'text/plain',
+        '.r': 'text/plain', '.swift': 'text/plain', '.kt': 'text/plain',
+        '.scala': 'text/plain', '.pl': 'text/plain', '.lua': 'text/plain',
+        # Images
+        '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+        '.png': 'image/png', '.gif': 'image/gif',
+        '.webp': 'image/webp', '.svg': 'image/svg+xml',
+        '.bmp': 'image/bmp', '.ico': 'image/x-icon',
+        # Video
+        '.mp4': 'video/mp4', '.webm': 'video/webm',
+        '.ogg': 'video/ogg', '.mov': 'video/quicktime',
+        '.avi': 'video/x-msvideo', '.mkv': 'video/x-matroska',
+        # Audio
+        '.mp3': 'audio/mpeg', '.wav': 'audio/wav',
+        '.flac': 'audio/flac', '.aac': 'audio/aac',
+        '.m4a': 'audio/mp4', '.wma': 'audio/x-ms-wma',
+        # Documents
+        '.pdf': 'application/pdf',
+    }
+
     def __init__(self, *args, shared_files=None, **kwargs):
         self.shared_files = shared_files or {}
         super().__init__(*args, **kwargs)
+
+    @classmethod
+    def _get_content_type(cls, file_path):
+        """Get MIME content type for a file based on its extension"""
+        ext = os.path.splitext(file_path)[1].lower()
+        return cls.CONTENT_TYPE_MAP.get(ext, 'application/octet-stream')
     
     def log_message(self, format, *args):
         """Override to capture connection events"""
@@ -100,16 +141,7 @@ class FileShareHandler(SimpleHTTPRequestHandler):
                 if os.path.exists(file_path):
                     file_size = os.path.getsize(file_path)
                     self.send_response(200)
-                    if file_path.lower().endswith(('.txt', '.py', '.js', '.html', '.css', '.json', '.xml')):
-                        self.send_header('Content-type', 'text/plain')
-                    elif file_path.lower().endswith(('.jpg', '.jpeg')):
-                        self.send_header('Content-type', 'image/jpeg')
-                    elif file_path.lower().endswith('.png'):
-                        self.send_header('Content-type', 'image/png')
-                    elif file_path.lower().endswith('.gif'):
-                        self.send_header('Content-type', 'image/gif')
-                    else:
-                        self.send_header('Content-type', 'application/octet-stream')
+                    self.send_header('Content-type', self._get_content_type(file_path))
                     self.send_header('Content-Length', str(file_size))
                     self.end_headers()
                 else:
@@ -249,19 +281,7 @@ class FileShareHandler(SimpleHTTPRequestHandler):
                     with open(file_path, 'rb') as f:
                         content = f.read()
                         self.send_response(200)
-                        
-                        # Determine content type
-                        if file_path.lower().endswith(('.txt', '.py', '.js', '.html', '.css', '.json', '.xml')):
-                            self.send_header('Content-type', 'text/plain')
-                        elif file_path.lower().endswith(('.jpg', '.jpeg')):
-                            self.send_header('Content-type', 'image/jpeg')
-                        elif file_path.lower().endswith('.png'):
-                            self.send_header('Content-type', 'image/png')
-                        elif file_path.lower().endswith('.gif'):
-                            self.send_header('Content-type', 'image/gif')
-                        else:
-                            self.send_header('Content-type', 'application/octet-stream')
-                        
+                        self.send_header('Content-type', self._get_content_type(file_path))
                         self.end_headers()
                         self.wfile.write(content)
                 except Exception as e:
@@ -273,7 +293,7 @@ class FileShareHandler(SimpleHTTPRequestHandler):
     
     def generate_file_list_html(self):
         """Generate enhanced HTML page with filtering and folder navigation"""
-        
+
         # Build folder structure
         folders = set()
         for file_info in self.shared_files.values():
@@ -283,9 +303,8 @@ class FileShareHandler(SimpleHTTPRequestHandler):
                 parts = file_info['folder'].split('/')
                 for i in range(1, len(parts)):
                     folders.add('/'.join(parts[:i]))
-        
+
         # Convert files to JSON for JavaScript
-        import json
         files_json = json.dumps([{
             'id': f['id'],
             'name': f.get('basename', f['name']),
@@ -296,313 +315,28 @@ class FileShareHandler(SimpleHTTPRequestHandler):
             'sizeBytes': f['size_bytes'],
             'modified': f['modified']
         } for f in self.shared_files.values()])
-        
+
         folders_json = json.dumps(sorted(list(folders)))
-        
-        html = f"""
-<!DOCTYPE html>
-<html>
-<head>
-    <title>LAN File Share</title>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <style>
-        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
-        body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f5f5f5; }}
-        .container {{ max-width: 1200px; margin: 0 auto; padding: 20px; }}
-        .header {{ background: white; padding: 20px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }}
-        h1 {{ color: #333; font-size: 24px; margin-bottom: 15px; }}
-        
-        .toolbar {{ display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 15px; }}
-        .search-box {{ flex: 1; min-width: 200px; padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; }}
-        .filter-select {{ padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; background: white; }}
-        .btn {{ padding: 10px 16px; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; transition: all 0.2s; }}
-        .btn-primary {{ background: #0078d4; color: white; }}
-        .btn-primary:hover {{ background: #106ebe; }}
-        .btn-secondary {{ background: #6c757d; color: white; }}
-        .btn-secondary:hover {{ background: #5a6268; }}
-        
-        .breadcrumb {{ background: #e9ecef; padding: 10px 15px; border-radius: 4px; margin-bottom: 15px; font-size: 14px; display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }}
-        .breadcrumb a {{ color: #0078d4; text-decoration: none; cursor: pointer; }}
-        .breadcrumb a:hover {{ text-decoration: underline; }}
-        .breadcrumb span {{ margin: 0 2px; color: #6c757d; }}
-        .btn-up {{ padding: 4px 10px; font-size: 13px; background: #e9ecef; border: 1px solid #ced4da; border-radius: 3px; cursor: pointer; margin-right: 8px; }}
-        .btn-up:hover {{ background: #dee2e6; }}
-        .btn-up:disabled {{ opacity: 0.4; cursor: default; }}
-        
-        .stats {{ color: #666; font-size: 14px; margin-bottom: 10px; }}
-        
-        .file-list {{ background: white; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); overflow: hidden; }}
-        .file-header {{ display: grid; grid-template-columns: 40px 1fr 120px 150px 100px; gap: 10px; padding: 12px 15px; background: #f8f9fa; border-bottom: 2px solid #dee2e6; font-weight: 600; font-size: 13px; color: #495057; }}
-        
-        .file-item, .folder-item {{ display: grid; grid-template-columns: 40px 1fr 120px 150px 100px; gap: 10px; padding: 12px 15px; border-bottom: 1px solid #e9ecef; align-items: center; cursor: pointer; transition: background 0.2s; }}
-        .file-item:hover, .folder-item:hover {{ background: #f8f9fa; }}
-        .file-item.hidden, .folder-item.hidden {{ display: none; }}
-        
-        .file-icon {{ font-size: 24px; text-align: center; }}
-        .file-name {{ font-size: 14px; color: #333; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
-        .file-size {{ font-size: 13px; color: #666; }}
-        .file-modified {{ font-size: 13px; color: #666; }}
-        .file-actions {{ display: flex; gap: 5px; }}
-        .action-btn {{ padding: 5px 10px; font-size: 12px; border: none; border-radius: 3px; cursor: pointer; text-decoration: none; display: inline-block; }}
-        .action-download {{ background: #0078d4; color: white; }}
-        .action-download:hover {{ background: #106ebe; }}
-        .action-preview {{ background: #28a745; color: white; }}
-        .action-preview:hover {{ background: #218838; }}
-        
-        .no-files {{ text-align: center; padding: 40px; color: #666; font-size: 16px; }}
-        .folder-item .file-name {{ color: #0078d4; font-weight: 500; }}
-        
-        @media (max-width: 768px) {{
-            .file-header, .file-item, .folder-item {{ grid-template-columns: 1fr; }}
-            .file-size, .file-modified {{ display: none; }}
-        }}
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="header">
-            <h1>📁 LAN File Share</h1>
-            
-            <div class="toolbar">
-                <input type="text" id="searchBox" class="search-box" placeholder="🔍 Search files..." oninput="filterFiles()">
-                <select id="typeFilter" class="filter-select" onchange="filterFiles()">
-                    <option value="">All Types</option>
-                    <option value="image">Images</option>
-                    <option value="video">Videos</option>
-                    <option value="audio">Audio</option>
-                    <option value="document">Documents</option>
-                    <option value="archive">Archives</option>
-                    <option value="other">Other</option>
-                </select>
-                <button class="btn btn-secondary" onclick="clearFilters()">Clear Filters</button>
-            </div>
-            
-            <div id="breadcrumb" class="breadcrumb">
-                <button class="btn-up" id="btnUp" onclick="goUp()" disabled>⬆️ Up</button>
-                <a href="#" onclick="navigateToFolder(''); return false;">🏠 Home</a>
-            </div>
-            
-            <div id="stats" class="stats"></div>
-        </div>
-        
-        <div class="file-list">
-            <div class="file-header">
-                <div></div>
-                <div>Name</div>
-                <div>Size</div>
-                <div>Modified</div>
-                <div>Actions</div>
-            </div>
-            <div id="fileContainer"></div>
-        </div>
-    </div>
-    
-    <script>
-        const allFiles = {files_json};
-        const allFolders = {folders_json};
-        let currentFolder = '';
 
-        const fileTypeMap = {{
-            'image': ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.svg', '.ico'],
-            'video': ['.mp4', '.avi', '.mkv', '.mov', '.wmv', '.flv', '.webm'],
-            'audio': ['.mp3', '.wav', '.flac', '.aac', '.ogg', '.wma', '.m4a'],
-            'document': ['.pdf', '.doc', '.docx', '.txt', '.rtf', '.odt', '.xls', '.xlsx', '.ppt', '.pptx'],
-            'archive': ['.zip', '.rar', '.7z', '.tar', '.gz', '.bz2']
-        }};
+        # Load and cache static template files
+        if FileShareHandler._template_cache is None:
+            static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static')
+            with open(os.path.join(static_dir, 'index.html'), 'r', encoding='utf-8') as f:
+                html_template = f.read()
+            with open(os.path.join(static_dir, 'style.css'), 'r', encoding='utf-8') as f:
+                css_content = f.read()
+            with open(os.path.join(static_dir, 'app.js'), 'r', encoding='utf-8') as f:
+                js_content = f.read()
+            # Inline CSS and JS into the HTML template
+            html_template = html_template.replace('/* __STYLE_CSS__ */', css_content)
+            html_template = html_template.replace('/* __APP_JS__ */', js_content)
+            FileShareHandler._template_cache = html_template
 
-        function escapeHtml(str) {{
-            const div = document.createElement('div');
-            div.textContent = str;
-            return div.innerHTML;
-        }}
+        # Substitute data placeholders per-request
+        html = FileShareHandler._template_cache
+        html = html.replace('__FILES_JSON__', files_json)
+        html = html.replace('__FOLDERS_JSON__', folders_json)
 
-        function getFileIcon(extension) {{
-            if (fileTypeMap.image.includes(extension)) return '🖼️';
-            if (fileTypeMap.video.includes(extension)) return '🎬';
-            if (fileTypeMap.audio.includes(extension)) return '🎵';
-            if (fileTypeMap.document.includes(extension)) return '📄';
-            if (fileTypeMap.archive.includes(extension)) return '📦';
-            return '📄';
-        }}
-
-        function getFileType(extension) {{
-            for (let [type, exts] of Object.entries(fileTypeMap)) {{
-                if (exts.includes(extension)) return type;
-            }}
-            return 'other';
-        }}
-
-        function navigateToFolder(folder) {{
-            currentFolder = folder;
-            updateBreadcrumb();
-            filterFiles();
-            // Scroll to top when navigating
-            window.scrollTo(0, 0);
-        }}
-
-        function goUp() {{
-            if (!currentFolder) return;
-            const lastSlash = currentFolder.lastIndexOf('/');
-            if (lastSlash === -1) {{
-                navigateToFolder('');
-            }} else {{
-                navigateToFolder(currentFolder.substring(0, lastSlash));
-            }}
-        }}
-
-        function updateBreadcrumb() {{
-            const breadcrumb = document.getElementById('breadcrumb');
-            const btnUp = document.getElementById('btnUp');
-
-            // Update the Up button state
-            if (btnUp) {{
-                btnUp.disabled = !currentFolder;
-            }}
-
-            // Build breadcrumb using DOM elements to avoid quote/XSS issues
-            // Keep the Up button, clear the rest
-            while (breadcrumb.children.length > 1) {{
-                breadcrumb.removeChild(breadcrumb.lastChild);
-            }}
-
-            const homeLink = document.createElement('a');
-            homeLink.href = '#';
-            homeLink.textContent = '🏠 Home';
-            homeLink.onclick = function(e) {{ e.preventDefault(); navigateToFolder(''); }};
-            breadcrumb.appendChild(homeLink);
-
-            if (currentFolder) {{
-                const parts = currentFolder.split('/');
-                let path = '';
-                for (let part of parts) {{
-                    path += (path ? '/' : '') + part;
-
-                    const sep = document.createElement('span');
-                    sep.textContent = '/';
-                    breadcrumb.appendChild(sep);
-
-                    const link = document.createElement('a');
-                    link.href = '#';
-                    link.textContent = part;
-                    const navPath = path;
-                    link.onclick = function(e) {{ e.preventDefault(); navigateToFolder(navPath); }};
-                    breadcrumb.appendChild(link);
-                }}
-            }}
-        }}
-
-        function filterFiles() {{
-            const searchTerm = document.getElementById('searchBox').value.toLowerCase();
-            const typeFilter = document.getElementById('typeFilter').value;
-
-            const container = document.getElementById('fileContainer');
-            container.innerHTML = '';
-
-            // Use DocumentFragment for batch DOM insertion (performance)
-            const fragment = document.createDocumentFragment();
-
-            // Get subfolders in current folder
-            const subfolders = allFolders.filter(f => {{
-                if (!currentFolder) {{
-                    return !f.includes('/') && f !== '';
-                }} else {{
-                    return f.startsWith(currentFolder + '/') &&
-                           f.split('/').length === currentFolder.split('/').length + 1;
-                }}
-            }});
-
-            // Get files in current folder
-            const filesInFolder = allFiles.filter(f => f.folder === currentFolder);
-
-            // Apply filters
-            let filteredFiles = filesInFolder.filter(f => {{
-                const matchesSearch = f.name.toLowerCase().includes(searchTerm);
-                const matchesType = !typeFilter || getFileType(f.extension) === typeFilter;
-                return matchesSearch && matchesType;
-            }});
-
-            // Show folders using safe DOM construction
-            subfolders.forEach(folder => {{
-                const folderName = folder.split('/').pop();
-                const div = document.createElement('div');
-                div.className = 'folder-item';
-                div.onclick = () => navigateToFolder(folder);
-                div.innerHTML = `
-                    <div class="file-icon">📁</div>
-                    <div class="file-name">${{escapeHtml(folderName)}}</div>
-                    <div class="file-size"></div>
-                    <div class="file-modified"></div>
-                    <div class="file-actions"></div>
-                `;
-                fragment.appendChild(div);
-            }});
-
-            // Show files with escaped HTML
-            filteredFiles.forEach(file => {{
-                const div = document.createElement('div');
-                div.className = 'file-item';
-                div.innerHTML = `
-                    <div class="file-icon">${{getFileIcon(file.extension)}}</div>
-                    <div class="file-name" title="${{escapeHtml(file.name)}}">${{escapeHtml(file.name)}}</div>
-                    <div class="file-size">${{escapeHtml(file.size)}}</div>
-                    <div class="file-modified">${{escapeHtml(file.modified)}}</div>
-                    <div class="file-actions">
-                        <a href="/download/${{encodeURIComponent(file.id)}}" class="action-btn action-download">⬇️</a>
-                        <a href="/files/${{encodeURIComponent(file.id)}}" target="_blank" class="action-btn action-preview">👁️</a>
-                    </div>
-                `;
-                fragment.appendChild(div);
-            }});
-
-            // Batch append all items at once (single reflow)
-            container.appendChild(fragment);
-
-            // Update stats
-            const totalItems = subfolders.length + filteredFiles.length;
-            const totalSize = filteredFiles.reduce((sum, f) => sum + f.sizeBytes, 0);
-            const sizeStr = formatBytes(totalSize);
-
-            document.getElementById('stats').textContent =
-                `${{totalItems}} item(s) | ${{filteredFiles.length}} file(s) | Total: ${{sizeStr}}`;
-
-            if (totalItems === 0) {{
-                container.innerHTML = '<div class="no-files">No files found</div>';
-            }}
-        }}
-
-        function formatBytes(bytes) {{
-            if (bytes === 0) return '0 B';
-            const k = 1024;
-            const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
-            const i = Math.floor(Math.log(bytes) / Math.log(k));
-            return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
-        }}
-
-        function clearFilters() {{
-            document.getElementById('searchBox').value = '';
-            document.getElementById('typeFilter').value = '';
-            filterFiles();
-        }}
-
-        // Keyboard navigation
-        document.addEventListener('keydown', function(e) {{
-            if (e.altKey && e.key === 'ArrowUp') {{
-                e.preventDefault();
-                goUp();
-            }}
-            if (e.key === 'Backspace' && document.activeElement.tagName !== 'INPUT') {{
-                e.preventDefault();
-                goUp();
-            }}
-        }});
-
-        // Initialize
-        filterFiles();
-    </script>
-</body>
-</html>
-"""
         return html
     
     def log_message(self, format, *args):

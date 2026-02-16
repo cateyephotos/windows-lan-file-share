@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>LAN File Share</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+/* __STYLE_CSS__ */
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>
+                <span>📁 LAN File Share</span>
+                <button class="btn-icon" id="themeToggle" onclick="toggleTheme()" title="Toggle dark mode">
+                    <span id="themeIcon">🌙</span>
+                </button>
+            </h1>
+
+            <div class="toolbar">
+                <input type="text" id="searchBox" class="search-box" placeholder="🔍 Search files..." oninput="filterFiles()">
+                <select id="typeFilter" class="filter-select" onchange="filterFiles()">
+                    <option value="">All Types</option>
+                    <option value="image">Images</option>
+                    <option value="video">Videos</option>
+                    <option value="audio">Audio</option>
+                    <option value="document">Documents</option>
+                    <option value="archive">Archives</option>
+                    <option value="other">Other</option>
+                </select>
+                <button class="btn btn-secondary" onclick="clearFilters()">Clear Filters</button>
+                <div class="toolbar-separator"></div>
+                <div class="view-toggle">
+                    <button class="btn-icon" id="listViewBtn" onclick="setViewMode('list')" title="List view">☰</button>
+                    <button class="btn-icon" id="gridViewBtn" onclick="setViewMode('grid')" title="Grid view">⊞</button>
+                </div>
+            </div>
+
+            <div id="breadcrumb" class="breadcrumb">
+                <button class="btn-up" id="btnUp" onclick="goUp()" disabled>⬆️ Up</button>
+                <a href="#" onclick="navigateToFolder(''); return false;">🏠 Home</a>
+            </div>
+
+            <div id="stats" class="stats"></div>
+        </div>
+
+        <div class="file-list">
+            <div class="file-header">
+                <div></div>
+                <div class="sortable" onclick="setSort('name')">
+                    Name <span class="sort-indicator" id="sort-name"></span>
+                </div>
+                <div class="sortable" onclick="setSort('size')">
+                    Size <span class="sort-indicator" id="sort-size"></span>
+                </div>
+                <div class="sortable" onclick="setSort('modified')">
+                    Modified <span class="sort-indicator" id="sort-modified"></span>
+                </div>
+                <div>Actions</div>
+            </div>
+            <div id="fileContainer"></div>
+        </div>
+    </div>
+
+    <!-- Preview Modal -->
+    <div id="previewModal" class="modal-overlay" style="display:none;">
+        <div class="modal-container">
+            <div class="modal-header">
+                <span id="modalTitle" class="modal-title"></span>
+                <div class="modal-actions">
+                    <a id="modalDownload" class="btn btn-primary btn-sm" href="#" onclick="event.stopPropagation();">⬇️ Download</a>
+                    <button class="btn-close" onclick="closePreviewModal()">&times;</button>
+                </div>
+            </div>
+            <div id="modalContent" class="modal-content"></div>
+        </div>
+    </div>
+
+    <script>
+        const allFiles = __FILES_JSON__;
+        const allFolders = __FOLDERS_JSON__;
+    </script>
+    <script>
+/* __APP_JS__ */
+    </script>
+</body>
+</html>
