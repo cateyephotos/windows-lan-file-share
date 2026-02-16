@@ -24,13 +24,37 @@ from client import FileShareClient, RemoteServerBrowser, create_client_integrati
 from config import get_chunk_size, validate_file_size, format_file_size, CONFIG, load_config_from_file
 from fast_transfer import OptimizedHTTPServer, should_use_multithread, calculate_optimal_threads, MultiThreadedDownloader, SpeedMonitor
 from settings_ui import open_settings
+from file_verification import FileVerifier, verify_download
 
 class FileShareHandler(SimpleHTTPRequestHandler):
     """Custom HTTP handler for file sharing"""
     
+    connection_callback = None  # Class variable for connection notifications
+    
     def __init__(self, *args, shared_files=None, **kwargs):
         self.shared_files = shared_files or {}
         super().__init__(*args, **kwargs)
+    
+    def log_message(self, format, *args):
+        """Override to capture connection events"""
+        # Call parent to maintain normal logging
+        super().log_message(format, *args)
+        
+        # Notify about connections
+        if self.connection_callback and args:
+            client_ip = self.client_address[0]
+            request_line = args[0] if len(args) > 0 else ""
+            
+            # Parse request to get action
+            if 'GET /' in request_line and 'HTTP' in request_line:
+                if '/download/' in request_line:
+                    action = "downloading file"
+                elif request_line.strip() == 'GET / HTTP/1.1' or request_line.strip() == 'GET / HTTP/1.0':
+                    action = "browsing files"
+                else:
+                    action = "accessing server"
+                
+                self.connection_callback(client_ip, action, request_line)
     
     def do_GET(self):
         if self.path == '/':
@@ -109,6 +133,11 @@ class FileShareHandler(SimpleHTTPRequestHandler):
             if os.path.exists(file_path):
                 filename = os.path.basename(file_path)
                 file_size = os.path.getsize(file_path)
+                
+                # Notify about file download
+                if self.connection_callback:
+                    client_ip = self.client_address[0]
+                    self.connection_callback(client_ip, "download_start", f"Downloading: {filename}")
                 
                 # Check for Range header (for multi-threaded downloads)
                 range_header = self.headers.get('Range')
@@ -292,6 +321,8 @@ class LANFileShareApp:
         self.browser = None
         self.current_remote_server = None
         self.download_save_dir = os.path.join(os.path.expanduser("~"), "Downloads", "LANFileShare")
+        self.connected_clients = {}  # Track connected clients
+        self.connection_history = []  # Store connection history
         
         self.setup_gui()
         self.get_local_ip()
@@ -320,6 +351,9 @@ class LANFileShareApp:
         
         self.port_label = ttk.Label(status_frame, text=f"Port: {self.port}")
         self.port_label.grid(row=2, column=0, sticky=tk.W)
+        
+        self.connections_label = ttk.Label(status_frame, text="Active Connections: 0", foreground="blue")
+        self.connections_label.grid(row=3, column=0, sticky=tk.W)
         
         # Server Control Buttons
         button_frame = ttk.Frame(main_frame)
@@ -687,6 +721,9 @@ class LANFileShareApp:
             else:
                 handler = lambda *args, **kwargs: FileShareHandler(*args, shared_files=self.shared_files, **kwargs)
             
+            # Set up connection notification callback
+            FileShareHandler.connection_callback = self.on_client_connection
+            
             # Start optimized server with network optimizations
             self.server = OptimizedHTTPServer.create_optimized_server(('0.0.0.0', self.port), handler)
             self.server_thread = threading.Thread(target=self.server.serve_forever, daemon=True)
@@ -860,6 +897,68 @@ class LANFileShareApp:
         """Open settings window"""
         open_settings(self.root)
         self.log("Settings window opened")
+    
+    def on_client_connection(self, client_ip, action, details):
+        """Handle client connection notifications"""
+        try:
+            # Update connection tracking
+            if client_ip not in self.connected_clients:
+                self.connected_clients[client_ip] = {
+                    'first_seen': datetime.now(),
+                    'last_seen': datetime.now(),
+                    'actions': []
+                }
+            else:
+                self.connected_clients[client_ip]['last_seen'] = datetime.now()
+            
+            # Add action to history
+            self.connected_clients[client_ip]['actions'].append({
+                'action': action,
+                'details': details,
+                'timestamp': datetime.now()
+            })
+            
+            # Add to connection history
+            self.connection_history.append({
+                'ip': client_ip,
+                'action': action,
+                'details': details,
+                'timestamp': datetime.now()
+            })
+            
+            # Update UI
+            self.update_connection_display()
+            
+            # Log the connection
+            if action == "browsing files":
+                self.log(f"🔵 Client connected: {client_ip} is browsing files")
+            elif action == "downloading file":
+                self.log(f"⬇️ Client {client_ip} is {action}")
+            elif action == "download_start":
+                self.log(f"📥 {client_ip}: {details}")
+            else:
+                self.log(f"🔗 Client {client_ip}: {action}")
+        
+        except Exception as e:
+            self.log(f"Error handling connection notification: {e}")
+    
+    def update_connection_display(self):
+        """Update the connection count display"""
+        try:
+            # Count active connections (seen in last 5 minutes)
+            now = datetime.now()
+            active_count = sum(1 for client in self.connected_clients.values() 
+                             if (now - client['last_seen']).total_seconds() < 300)
+            
+            self.connections_label.config(text=f"Active Connections: {active_count}")
+            
+            # Update color based on activity
+            if active_count > 0:
+                self.connections_label.config(foreground="green")
+            else:
+                self.connections_label.config(foreground="blue")
+        except Exception as e:
+            pass
     
     def log(self, message):
         """Add message to activity log"""

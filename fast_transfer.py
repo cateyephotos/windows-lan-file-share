@@ -13,6 +13,7 @@ from urllib.parse import urljoin
 import urllib.request
 import urllib.error
 from config import CONFIG
+from file_verification import FileVerifier, ResumeManager, ChunkVerifier
 
 class MultiThreadedDownloader:
     """
@@ -20,12 +21,14 @@ class MultiThreadedDownloader:
     Significantly speeds up large file transfers
     """
     
-    def __init__(self, url, save_path, file_size, num_threads=None, token=None):
+    def __init__(self, url, save_path, file_size, num_threads=None, token=None, expected_checksum=None, enable_resume=True):
         self.url = url
         self.save_path = save_path
         self.file_size = file_size
         self.num_threads = num_threads or CONFIG.get('max_download_threads', 4)
         self.token = token
+        self.expected_checksum = expected_checksum
+        self.enable_resume = enable_resume
         
         self.chunks_queue = queue.Queue()
         self.downloaded_bytes = 0
@@ -33,6 +36,8 @@ class MultiThreadedDownloader:
         self.errors = []
         self.start_time = None
         self.is_cancelled = False
+        self.resume_manager = ResumeManager() if enable_resume else None
+        self.download_id = self._generate_download_id()
         
     def download(self, progress_callback=None):
         """
@@ -94,16 +99,45 @@ class MultiThreadedDownloader:
         if self.is_cancelled:
             return False, "Download cancelled"
         
-        # Merge chunks into final file
+        # Merge chunks into final file with verification
         try:
-            with open(self.save_path, 'wb') as output_file:
-                for temp_file in sorted(temp_files, key=lambda x: x['id']):
-                    with open(temp_file['path'], 'rb') as chunk_file:
-                        output_file.write(chunk_file.read())
-                    # Delete temp file
-                    os.remove(temp_file['path'])
+            # Prepare chunk files in order
+            sorted_chunks = sorted(temp_files, key=lambda x: x['id'])
+            chunk_paths = [c['path'] for c in sorted_chunks]
             
-            return True, "Download complete"
+            # Merge and verify
+            success, error_msg = ChunkVerifier.merge_and_verify_chunks(
+                chunk_paths,
+                self.save_path,
+                self.file_size,
+                self.expected_checksum
+            )
+            
+            if not success:
+                return False, error_msg
+            
+            # Delete temp files after successful merge
+            for temp_file in sorted_chunks:
+                try:
+                    os.remove(temp_file['path'])
+                except:
+                    pass
+            
+            # Delete resume info after successful download
+            if self.resume_manager:
+                self.resume_manager.delete_resume_info(self.download_id)
+            
+            # Final verification
+            if self.expected_checksum:
+                is_valid, actual_checksum = FileVerifier.verify_file(
+                    self.save_path,
+                    self.expected_checksum,
+                    'sha256'
+                )
+                if not is_valid:
+                    return False, "Final checksum verification failed"
+            
+            return True, "Download complete and verified"
             
         except Exception as e:
             return False, f"Error merging chunks: {str(e)}"
@@ -159,9 +193,43 @@ class MultiThreadedDownloader:
                     self.errors.append(str(e))
                 break
     
+    def _generate_download_id(self):
+        """Generate unique download ID for resume tracking"""
+        import hashlib
+        unique_string = f"{self.url}_{self.save_path}_{self.file_size}"
+        return hashlib.md5(unique_string.encode()).hexdigest()
+    
+    def _save_resume_info(self):
+        """Save resume information for interrupted downloads"""
+        if not self.resume_manager:
+            return
+        
+        resume_info = {
+            'url': self.url,
+            'save_path': self.save_path,
+            'total_size': self.file_size,
+            'downloaded': self.downloaded_bytes,
+            'checksum': self.expected_checksum,
+            'timestamp': time.time()
+        }
+        
+        self.resume_manager.save_resume_info(self.download_id, resume_info)
+    
+    def can_resume(self):
+        """Check if download can be resumed"""
+        if not self.resume_manager:
+            return False, 0
+        
+        return self.resume_manager.can_resume(
+            self.download_id,
+            self.save_path + '.partial',
+            self.file_size
+        )
+    
     def cancel(self):
         """Cancel the download"""
         self.is_cancelled = True
+        self._save_resume_info()
 
 class OptimizedHTTPServer:
     """

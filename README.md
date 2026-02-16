@@ -15,7 +15,12 @@ A comprehensive Windows utility for sharing and downloading files over WiFi-LAN 
 - **Network Discovery**: Automatically discover other file share instances on the LAN
 - **Remote File Browsing**: Browse files on discovered servers and download directly from the application
 - **Speed Monitoring**: Real-time transfer speed display (MB/s) with progress tracking
-- **HTTP Range Support**: Partial downloads and resume capability (foundation for future features)
+- **HTTP Range Support**: Partial downloads and resume capability
+- **File Verification**: SHA-256 checksum verification ensures file integrity
+- **Resume Downloads**: Automatically resume interrupted downloads from where they left off
+- **Chunk Verification**: Individual chunk validation in multi-threaded downloads
+- **Client Connection Notifications**: Real-time notifications when clients connect and download files
+- **Connection Tracking**: Monitor active connections and view connection history
 - **Security Features**: Optional access control with token authentication
 - **Real-time Status**: Monitor server status and activity logs
 - **No Installation Required**: Uses only Python standard library (with optional enhancements)
@@ -104,6 +109,103 @@ A comprehensive Windows utility for sharing and downloading files over WiFi-LAN 
 - Click "Cancel" to discard changes
 
 **Note**: When adding a folder, all files within that folder and its subfolders will be automatically added to the share list.
+
+### Monitoring Client Connections
+
+The application provides real-time notifications when clients connect to your server:
+
+**Connection Display:**
+- **Active Connections Counter**: Shows number of clients connected in the last 5 minutes
+- **Color Indicators**: 
+  - Green = Active connections present
+  - Blue = No active connections
+
+**Activity Log Notifications:**
+- 🔵 **Client Browsing**: When someone views your file list
+- 📥 **Download Started**: When a client begins downloading a file
+- ⬇️ **File Transfer**: Ongoing download activity
+
+**Connection Tracking:**
+- Tracks each client's IP address
+- Records first and last connection times
+- Maintains history of all actions (browsing, downloading)
+- Auto-expires inactive connections after 5 minutes
+
+**Example Notifications:**
+```
+[14:23:15] 🔵 Client connected: 192.168.1.105 is browsing files
+[14:23:22] 📥 192.168.1.105: Downloading: presentation.pdf
+[14:24:01] 🔵 Client connected: 192.168.1.108 is browsing files
+```
+
+### File Verification & Integrity
+
+The application includes comprehensive file verification to ensure downloads are error-free:
+
+**Checksum Verification:**
+- **SHA-256 hashing** for file integrity verification
+- **MD5 support** for faster verification of smaller files
+- **Automatic verification** after download completion
+- **Chunk-level verification** in multi-threaded downloads
+
+**How It Works:**
+1. Server calculates file checksum when sharing
+2. Client downloads file (single or multi-threaded)
+3. Individual chunks verified during download
+4. Final merged file verified against expected checksum
+5. Download marked as complete only if verification passes
+
+**Benefits:**
+- ✅ Detects corrupted downloads
+- ✅ Ensures file integrity across network
+- ✅ Validates multi-threaded chunk merging
+- ✅ Prevents incomplete or damaged files
+
+**Verification Process:**
+```
+[14:30:10] Starting multi-threaded download (4 threads)...
+[14:30:45] Downloading: 75% @ 18.2 MB/s
+[14:31:02] Download complete
+[14:31:03] Verifying file integrity...
+[14:31:05] ✓ File verified successfully (SHA-256 match)
+```
+
+### Resume Download Capability
+
+Interrupted downloads can be automatically resumed:
+
+**Resume Features:**
+- **Automatic detection** of partial downloads
+- **Resume from last byte** - no re-downloading completed portions
+- **Resume metadata** stored in `~/.lan_file_share/resume/`
+- **Works with multi-threaded downloads**
+
+**How Resume Works:**
+1. Download interrupted (network issue, app closed, etc.)
+2. Resume information saved automatically
+3. Next download attempt detects partial file
+4. Downloads only remaining bytes
+5. Verifies complete file after resume
+
+**Resume Information Stored:**
+- File URL and save path
+- Total file size
+- Bytes already downloaded
+- Expected checksum
+- Timestamp of interruption
+
+**Example Resume:**
+```
+[15:10:20] Starting download: large_video.mp4 (2.5 GB)
+[15:12:45] Download interrupted at 45% (1.1 GB)
+[15:15:00] Resuming download from 1.1 GB...
+[15:17:30] Download complete and verified
+```
+
+**Manual Resume Control:**
+- Resume info automatically cleaned up after successful download
+- Partial files kept with `.partial` extension
+- Can manually delete resume info to force fresh download
 
 ### Network Discovery & Bi-Directional Sharing
 
@@ -437,6 +539,7 @@ windsurf-project/
 ├── security.py            # Security features
 ├── config.py              # Configuration and file size management
 ├── fast_transfer.py       # Multi-threaded downloads and network optimization
+├── file_verification.py   # File integrity verification and resume downloads
 ├── settings_ui.py         # Settings configuration UI
 ├── setup.py               # Setup script
 ├── start.bat              # Main launcher (recommended)
