@@ -536,7 +536,8 @@ class LANFileShareApp:
         self.client = None
         self.browser = None
         self.current_remote_server = None
-        self.download_save_dir = os.path.join(os.path.expanduser("~"), "Downloads", "LANFileShare")
+        # Load download directory from config or use default
+        self.download_save_dir = self.load_download_directory()
         self.connected_clients = {}  # Track connected clients
         self.connection_history = []  # Store connection history
         
@@ -751,7 +752,10 @@ class LANFileShareApp:
         # Download location
         ttk.Label(main_frame, text="Download to:").grid(row=1, column=1, padx=(20, 5))
         download_dir_var = tk.StringVar(value=self.download_save_dir)
-        ttk.Entry(main_frame, textvariable=download_dir_var, width=30).grid(row=1, column=2)
+        download_entry = ttk.Entry(main_frame, textvariable=download_dir_var, width=25)
+        download_entry.grid(row=1, column=2)
+        ttk.Button(main_frame, text="Browse...", 
+                  command=lambda: self.browse_download_directory(download_dir_var)).grid(row=1, column=3, padx=(5, 0))
         
         # File list
         columns = ('Name', 'Size', 'Modified')
@@ -1121,6 +1125,52 @@ class LANFileShareApp:
     def format_file_size(self, size_bytes):
         """Format file size in human readable format"""
         return format_file_size(size_bytes)
+    
+    def load_download_directory(self):
+        """Load download directory from config file"""
+        config_file = os.path.join(os.path.expanduser("~"), ".lanfileshare_config.json")
+        try:
+            if os.path.exists(config_file):
+                with open(config_file, 'r') as f:
+                    config = json.load(f)
+                    download_dir = config.get('download_directory')
+                    if download_dir and os.path.exists(os.path.dirname(download_dir)):
+                        return download_dir
+        except Exception as e:
+            self.log(f"Error loading download directory config: {e}")
+        
+        # Default location
+        return os.path.join(os.path.expanduser("~"), "Downloads", "LANFileShare")
+    
+    def save_download_directory(self, directory):
+        """Save download directory to config file"""
+        config_file = os.path.join(os.path.expanduser("~"), ".lanfileshare_config.json")
+        try:
+            config = {}
+            if os.path.exists(config_file):
+                with open(config_file, 'r') as f:
+                    config = json.load(f)
+            
+            config['download_directory'] = directory
+            
+            with open(config_file, 'w') as f:
+                json.dump(config, f, indent=2)
+            
+            self.download_save_dir = directory
+            self.log(f"Download directory saved: {directory}")
+        except Exception as e:
+            self.log(f"Error saving download directory config: {e}")
+    
+    def browse_download_directory(self, dir_var):
+        """Browse for download directory"""
+        directory = filedialog.askdirectory(
+            title="Select Download Directory",
+            initialdir=dir_var.get()
+        )
+        
+        if directory:
+            dir_var.set(directory)
+            self.save_download_directory(directory)
     
     def open_settings(self):
         """Open settings window"""
