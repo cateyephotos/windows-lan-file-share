@@ -559,6 +559,7 @@ class LANFileShareApp:
         self.shared_files = {}
         self.is_server_running = False
         self.port = 8000
+        self.port_range = range(8000, 8010)  # Try ports 8000-8009 if needed
         self.discovery = None
         self.access_control = AccessControl()
         self.use_security = False
@@ -956,6 +957,24 @@ class LANFileShareApp:
             self.ip_label.config(text=f"IP: {self.local_ip}")
             self.log(f"Could not detect local IP, using localhost: {str(e)}")
     
+    def is_port_available(self, port):
+        """Check if a port is available for binding"""
+        try:
+            test_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            test_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            test_socket.bind(('0.0.0.0', port))
+            test_socket.close()
+            return True
+        except OSError:
+            return False
+    
+    def find_available_port(self):
+        """Find an available port from the port range"""
+        for port in self.port_range:
+            if self.is_port_available(port):
+                return port
+        return None
+    
     def start_server(self):
         """Start the file sharing server"""
         if not self.shared_files:
@@ -963,6 +982,25 @@ class LANFileShareApp:
             return
         
         try:
+            # Check if default port is available, otherwise find alternative
+            if not self.is_port_available(self.port):
+                self.log(f"Port {self.port} is already in use, searching for alternative...")
+                available_port = self.find_available_port()
+                
+                if available_port is None:
+                    error_msg = f"No available ports found in range {self.port_range.start}-{self.port_range.stop-1}.\n\n" \
+                               f"Please close other applications using these ports or:\n" \
+                               f"1. Check Windows Firewall settings\n" \
+                               f"2. Run as Administrator\n" \
+                               f"3. Restart your computer"
+                    messagebox.showerror("Port Unavailable", error_msg)
+                    self.log("Failed to start server: No available ports")
+                    return
+                
+                self.port = available_port
+                self.port_label.config(text=f"Port: {self.port}")
+                self.log(f"Using alternative port: {self.port}")
+            
             # Create handler with shared files and security
             if self.use_security:
                 handler = lambda *args, **kwargs: SecureFileShareHandler(
@@ -988,10 +1026,36 @@ class LANFileShareApp:
             
             if self.use_security:
                 self.log(f"Secure server started on http://{self.local_ip}:{self.port}")
-                self.log("Access token authentication required")
+                token = self.access_control.generate_token()
+                self.log(f"Access token: {token}")
+                messagebox.showinfo("Server Started", f"Server started with security enabled.\n\nAccess Token: {token}\n\nShare this token with authorized users.")
             else:
                 self.log(f"Server started on http://{self.local_ip}:{self.port}")
             
+        except PermissionError as e:
+            error_msg = f"Permission denied to bind to port {self.port}.\n\n" \
+                       f"Solutions:\n" \
+                       f"1. Run the application as Administrator\n" \
+                       f"2. Check Windows Firewall settings\n" \
+                       f"3. Ensure no other application is using port {self.port}"
+            messagebox.showerror("Permission Error", error_msg)
+            self.log(f"Server start failed: Permission denied on port {self.port}")
+        except OSError as e:
+            if "10013" in str(e) or "access" in str(e).lower():
+                error_msg = f"Cannot access port {self.port}.\n\n" \
+                           f"This usually means:\n" \
+                           f"• Another application is using this port\n" \
+                           f"• Windows Firewall is blocking the port\n" \
+                           f"• Insufficient permissions\n\n" \
+                           f"Solutions:\n" \
+                           f"1. Close other applications (Skype, IIS, etc.)\n" \
+                           f"2. Run as Administrator\n" \
+                           f"3. Allow Python through Windows Firewall"
+                messagebox.showerror("Port Access Error", error_msg)
+                self.log(f"Server start failed: Port {self.port} access denied (WinError 10013)")
+            else:
+                messagebox.showerror("Server Error", f"Failed to start server: {str(e)}")
+                self.log(f"Server start failed: {str(e)}")
         except Exception as e:
             messagebox.showerror("Server Error", f"Failed to start server: {str(e)}")
             self.log(f"Server start failed: {str(e)}")
@@ -1005,6 +1069,9 @@ class LANFileShareApp:
                 self.server_thread.join(timeout=5)
                 self.is_server_running = False
                 self.update_server_status(False)
+                # Reset to default port for next start
+                self.port = 8000
+                self.port_label.config(text=f"Port: {self.port}")
                 self.log("Server stopped")
             except Exception as e:
                 self.log(f"Error stopping server: {str(e)}")
